@@ -539,12 +539,72 @@ static void cachefiles_end_operation(struct netfs_cache_resources *cres)
 	fscache_end_cookie_access(fscache_cres_cookie(cres), fscache_access_io_end);
 }
 
+#ifdef CONFIG_CACHEFILES_ONDEMAND
+static struct cachefiles_req *cachefiles_alloc_req(struct cachefiles_object *object,
+						   loff_t start_pos,
+						   size_t len)
+{
+	struct cachefiles_req *req;
+	struct cachefiles_req_in *base;
+
+	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	if (!req)
+		return NULL;
+
+	base = &req->base;
+
+	base->off = start_pos;
+	base->len = len;
+	strncpy(base->path, object->d_name, sizeof(base->path) - 1);
+
+	init_completion(&req->done);
+
+	return req;
+}
+
+int cachefiles_ondemand_read(struct netfs_cache_resources *cres,
+			     loff_t start_pos, size_t len)
+{
+	struct cachefiles_object *object;
+	struct cachefiles_cache *cache;
+	struct cachefiles_req *req;
+	int ret;
+	u32 id;
+
+	object = cachefiles_cres_object(cres);
+	cache = object->volume->cache;
+
+	if (!test_bit(CACHEFILES_ONDEMAND_MODE, &cache->flags))
+		return -EOPNOTSUPP;
+
+	req = cachefiles_alloc_req(object, start_pos, len);
+	if (!req)
+		return -ENOMEM;
+
+	ret = xa_alloc(&cache->reqs, &id, req, xa_limit_32b, GFP_KERNEL);
+	if (ret) {
+		kfree(req);
+		return -ENOMEM;
+	}
+
+	wake_up_all(&cache->daemon_pollwq);
+
+	wait_for_completion(&req->done);
+	kfree(req);
+
+	return 0;
+}
+#endif
+
 static const struct netfs_cache_ops cachefiles_netfs_cache_ops = {
 	.end_operation		= cachefiles_end_operation,
 	.read			= cachefiles_read,
 	.write			= cachefiles_write,
 	.prepare_read		= cachefiles_prepare_read,
 	.prepare_write		= cachefiles_prepare_write,
+#ifdef CONFIG_CACHEFILES_ONDEMAND
+	.ondemand_read		= cachefiles_ondemand_read,
+#endif
 };
 
 /*

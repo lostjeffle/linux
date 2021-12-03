@@ -747,3 +747,161 @@ static void cachefiles_daemon_unbind(struct cachefiles_cache *cache)
 
 	_leave("");
 }
+
+#ifdef CONFIG_CACHEFILES_ONDEMAND
+static int cachefiles_ondemand_open(struct inode *inode, struct file *file);
+static int cachefiles_ondemand_release(struct inode *inode, struct file *file);
+static ssize_t cachefiles_ondemand_write(struct file *, const char __user *,
+					 size_t, loff_t *);
+static ssize_t cachefiles_ondemand_read(struct file *, char __user *, size_t,
+					loff_t *);
+static __poll_t cachefiles_ondemand_poll(struct file *,
+					 struct poll_table_struct *);
+static int cachefiles_daemon_done(struct cachefiles_cache *, char *);
+
+const struct file_operations cachefiles_ondemand_fops = {
+	.owner		= THIS_MODULE,
+	.open		= cachefiles_ondemand_open,
+	.release	= cachefiles_ondemand_release,
+	.read		= cachefiles_ondemand_read,
+	.write		= cachefiles_ondemand_write,
+	.poll		= cachefiles_ondemand_poll,
+	.llseek		= noop_llseek,
+};
+
+static const struct cachefiles_daemon_cmd cachefiles_ondemand_cmds[] = {
+	{ "bind",	cachefiles_daemon_bind		},
+	{ "brun",	cachefiles_daemon_brun		},
+	{ "bcull",	cachefiles_daemon_bcull		},
+	{ "bstop",	cachefiles_daemon_bstop		},
+	{ "cull",	cachefiles_daemon_cull		},
+	{ "debug",	cachefiles_daemon_debug		},
+	{ "dir",	cachefiles_daemon_dir		},
+	{ "frun",	cachefiles_daemon_frun		},
+	{ "fcull",	cachefiles_daemon_fcull		},
+	{ "fstop",	cachefiles_daemon_fstop		},
+	{ "inuse",	cachefiles_daemon_inuse		},
+	{ "secctx",	cachefiles_daemon_secctx	},
+	{ "tag",	cachefiles_daemon_tag		},
+	{ "done",	cachefiles_daemon_done		},
+	{ "",		NULL				}
+};
+
+static int cachefiles_ondemand_open(struct inode *inode, struct file *file)
+{
+	struct cachefiles_cache *cache;
+	int ret;
+
+	ret = cachefiles_daemon_open(inode, file);
+	if (!ret) {
+		cache = file->private_data;
+		xa_init_flags(&cache->reqs, XA_FLAGS_ALLOC);
+		set_bit(CACHEFILES_ONDEMAND_MODE, &cache->flags);
+	}
+
+	return ret;
+}
+
+static int cachefiles_ondemand_release(struct inode *inode, struct file *file)
+{
+	struct cachefiles_cache *cache = file->private_data;
+
+	_enter("");
+
+	ASSERT(cache);
+
+	set_bit(CACHEFILES_DEAD, &cache->flags);
+
+	cachefiles_daemon_unbind(cache);
+
+	/* clean up the control file interface */
+	xa_destroy(&cache->reqs);
+	cache->cachefilesd = NULL;
+	file->private_data = NULL;
+	cachefiles_open = 0;
+
+	kfree(cache);
+
+	_leave("");
+	return 0;
+}
+
+static ssize_t cachefiles_ondemand_write(struct file *file,
+					 const char __user *_data,
+					 size_t datalen,
+					 loff_t *pos)
+{
+	return cachefiles_daemon_do_write(file, _data, datalen, pos,
+					  cachefiles_ondemand_cmds);
+}
+
+static ssize_t cachefiles_ondemand_read(struct file *file, char __user *_buffer,
+					size_t buflen, loff_t *pos)
+{
+	struct cachefiles_cache *cache = file->private_data;
+	struct cachefiles_req *req;
+	unsigned long id = 0;
+	int n;
+
+	if (!test_bit(CACHEFILES_READY, &cache->flags))
+		return 0;
+
+	req = xa_find(&cache->reqs, &id, UINT_MAX, XA_PRESENT);
+	if (!req)
+		return 0;
+
+	n = sizeof(struct cachefiles_req_in);
+	if (n > buflen)
+		return -EMSGSIZE;
+
+	req->base.id = id;
+	if (copy_to_user(_buffer, &req->base, n) != 0)
+		return -EFAULT;
+
+	return n;
+}
+
+static __poll_t cachefiles_ondemand_poll(struct file *file,
+					 struct poll_table_struct *poll)
+{
+	struct cachefiles_cache *cache = file->private_data;
+	__poll_t mask;
+
+	poll_wait(file, &cache->daemon_pollwq, poll);
+	mask = 0;
+
+	if (!xa_empty(&cache->reqs))
+		mask |= EPOLLIN;
+
+	return mask;
+}
+
+/*
+ * Request completion
+ * - command: "done <id>"
+ */
+static int cachefiles_daemon_done(struct cachefiles_cache *cache, char *args)
+{
+	struct cachefiles_req *req;
+	unsigned long id;
+	int ret;
+
+	_enter(",%s", args);
+
+	if (!*args) {
+		pr_err("Empty id specified\n");
+		return -EINVAL;
+	}
+
+	ret = kstrtoul(args, 0, &id);
+	if (ret)
+		return ret;
+
+	req = xa_erase(&cache->reqs, id);
+	if (!req)
+		return -EINVAL;
+
+	complete(&req->done);
+	return 0;
+}
+#endif

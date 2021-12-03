@@ -15,6 +15,8 @@
 #include <linux/fscache-cache.h>
 #include <linux/cred.h>
 #include <linux/security.h>
+#include <linux/xarray.h>
+#include <linux/cachefiles.h>
 
 #define CACHEFILES_DIO_BLOCK_SIZE 4096
 
@@ -60,6 +62,13 @@ struct cachefiles_object {
 #define CACHEFILES_OBJECT_USING_TMPFILE	0		/* Have an unlinked tmpfile */
 };
 
+#ifdef CONFIG_CACHEFILES_ONDEMAND
+struct cachefiles_req {
+	struct cachefiles_req_in base;
+	struct completion done;
+};
+#endif
+
 /*
  * Cache files cache definition
  */
@@ -102,6 +111,9 @@ struct cachefiles_cache {
 	char				*rootdirname;	/* name of cache root directory */
 	char				*secctx;	/* LSM security context */
 	char				*tag;		/* cache binding tag */
+#ifdef CONFIG_CACHEFILES_ONDEMAND
+	struct xarray			reqs;
+#endif
 };
 
 #include <trace/events/cachefiles.h>
@@ -146,6 +158,9 @@ extern int cachefiles_has_space(struct cachefiles_cache *cache,
  * daemon.c
  */
 extern const struct file_operations cachefiles_daemon_fops;
+#ifdef CONFIG_CACHEFILES_ONDEMAND
+extern const struct file_operations cachefiles_ondemand_fops;
+#endif
 
 /*
  * error_inject.c
