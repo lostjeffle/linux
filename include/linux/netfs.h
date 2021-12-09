@@ -246,6 +246,11 @@ struct netfs_cache_ops {
 	int (*prepare_write)(struct netfs_cache_resources *cres,
 			     loff_t *_start, size_t *_len, loff_t i_size,
 			     bool no_space_allocated_yet);
+
+#ifdef CONFIG_NETFS_ONDEMAND
+	int (*ondemand_read)(struct netfs_cache_resources *cres,
+			     loff_t start_pos, size_t len);
+#endif
 };
 
 struct readahead_control;
@@ -261,6 +266,9 @@ extern int netfs_write_begin(struct file *, struct address_space *,
 			     void **,
 			     const struct netfs_read_request_ops *,
 			     void *);
+#ifdef CONFIG_NETFS_ONDEMAND
+extern void netfs_ondemand_read(struct netfs_read_subrequest *);
+#endif
 
 extern void netfs_subreq_terminated(struct netfs_read_subrequest *, ssize_t, bool);
 extern void netfs_stats_show(struct seq_file *);

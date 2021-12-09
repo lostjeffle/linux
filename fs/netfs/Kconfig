@@ -21,3 +21,11 @@ config NETFS_STATS
 	  multi-CPU system these may be on cachelines that keep bouncing
 	  between CPUs.  On the other hand, the stats are very useful for
 	  debugging purposes.  Saying 'Y' here is recommended.
+
+config NETFS_ONDEMAND
+	bool "Support for on-demand reading"
+	depends on NETFS_SUPPORT
+	default n
+	help
+	  This enables on-demand reading with netfs API.
+	  If unsure, say N.

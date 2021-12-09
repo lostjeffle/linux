@@ -41,3 +41,11 @@ config FSCACHE_DEBUG
 
 config FSCACHE_OLD_API
 	bool
+
+config FSCACHE_ONDEMAND
+	bool "Support for on-demand reading"
+	depends on FSCACHE
+	select NETFS_ONDEMAND
+	help
+	  This permits on-demand reading with fscache.
+	  If unsure, say N.
