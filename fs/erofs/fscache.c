@@ -6,8 +6,41 @@
 
 static struct fscache_volume *volume;
 
-static const struct address_space_operations erofs_fscache_blob_aops = {
+static int erofs_blob_begin_cache_operation(struct netfs_read_request *rreq)
+{
+	return fscache_begin_read_operation(&rreq->cache_resources,
+					    rreq->netfs_priv);
+}
+
+/* .cleanup() is needed if rreq->netfs_priv is non-NULL */
+static void erofs_noop_cleanup(struct address_space *mapping, void *netfs_priv)
+{
+}
+
+static const struct netfs_read_request_ops erofs_blob_req_ops = {
+	.begin_cache_operation  = erofs_blob_begin_cache_operation,
+	.cleanup		= erofs_noop_cleanup,
 };
+
+static int erofs_fscache_blob_readpage(struct file *data, struct page *page)
+{
+	struct folio *folio = page_folio(page);
+	struct erofs_fscache_context *ctx =
+		(struct erofs_fscache_context *)data;
+
+	return netfs_readpage(NULL, folio, &erofs_blob_req_ops, ctx->cookie);
+}
+
+static const struct address_space_operations erofs_fscache_blob_aops = {
+	.readpage = erofs_fscache_blob_readpage,
+};
+
+struct page *erofs_fscache_read_cache_page(struct erofs_fscache_context *ctx,
+					   pgoff_t index)
+{
+	DBG_BUGON(!ctx->inode);
+	return read_mapping_page(ctx->inode->i_mapping, index, ctx);
+}
 
 static int erofs_fscache_init_cookie(struct erofs_fscache_context *ctx,
 				     char *path)
