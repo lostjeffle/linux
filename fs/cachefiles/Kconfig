@@ -26,3 +26,11 @@ config CACHEFILES_ERROR_INJECTION
 	help
 	  This permits error injection to be enabled in cachefiles whilst a
 	  cache is in service.
+
+config CACHEFILES_ONDEMAND
+	bool "Support for on-demand reading"
+	depends on CACHEFILES && FSCACHE_ONDEMAND
+	default n
+	help
+	  This permits on-demand read mode of cachefiles.
+	  If unsure, say N.
