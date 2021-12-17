@@ -97,6 +97,10 @@ struct erofs_sb_lz4_info {
 	u16 max_pclusterblks;
 };
 
+struct erofs_fscache_context {
+	struct fscache_cookie *cookie;
+};
+
 struct erofs_sb_info {
 	struct erofs_mount_opts opt;	/* options */
 #ifdef CONFIG_EROFS_FS_ZIP
@@ -620,6 +624,10 @@ static inline int z_erofs_load_lzma_config(struct super_block *sb,
 /* fscache.c */
 int erofs_init_fscache(void);
 void erofs_exit_fscache(void);
+
+struct erofs_fscache_context *erofs_fscache_get_ctx(struct super_block *sb,
+						char *path);
+void erofs_fscache_put_ctx(struct erofs_fscache_context *ctx);
 
 #define EFSCORRUPTED    EUCLEAN         /* Filesystem is corrupted */
 
