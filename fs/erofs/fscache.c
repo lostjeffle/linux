@@ -4,6 +4,17 @@
  */
 #include "internal.h"
 
+struct erofs_fscache_map {
+	struct erofs_fscache_context *m_ctx;
+	erofs_off_t m_pa, m_la, o_la;
+	u64 m_llen;
+};
+
+struct erofs_fscache_priv {
+	struct fscache_cookie *cookie;
+	loff_t offset;
+};
+
 static struct fscache_volume *volume;
 
 static int erofs_blob_begin_cache_operation(struct netfs_read_request *rreq)
@@ -20,6 +31,33 @@ static void erofs_noop_cleanup(struct address_space *mapping, void *netfs_priv)
 static const struct netfs_read_request_ops erofs_blob_req_ops = {
 	.begin_cache_operation  = erofs_blob_begin_cache_operation,
 	.cleanup		= erofs_noop_cleanup,
+};
+
+static int erofs_begin_cache_operation(struct netfs_read_request *rreq)
+{
+	struct erofs_fscache_priv *priv = rreq->netfs_priv;
+
+	rreq->p_start = priv->offset;
+	return fscache_begin_read_operation(&rreq->cache_resources,
+					    priv->cookie);
+}
+
+static bool erofs_clamp_length(struct netfs_read_subrequest *subreq)
+{
+	/*
+	 * For non-inline layout, rreq->i_size is actually the size of upper
+	 * file in erofs rather than that of blob file. Thus when cache miss,
+	 * subreq->len can be restricted to the upper file size, while we hope
+	 * blob file can be filled in a EROFS_BLKSIZ granule.
+	 */
+	subreq->len = round_up(subreq->len, EROFS_BLKSIZ);
+	return true;
+}
+
+static const struct netfs_read_request_ops erofs_req_ops = {
+	.begin_cache_operation  = erofs_begin_cache_operation,
+	.cleanup		= erofs_noop_cleanup,
+	.clamp_length		= erofs_clamp_length,
 };
 
 static int erofs_fscache_blob_readpage(struct file *data, struct page *page)
@@ -41,6 +79,79 @@ struct page *erofs_fscache_read_cache_page(struct erofs_fscache_context *ctx,
 	DBG_BUGON(!ctx->inode);
 	return read_mapping_page(ctx->inode->i_mapping, index, ctx);
 }
+
+static int erofs_fscache_readpage_noinline(struct page *page,
+					   struct erofs_fscache_map *fsmap)
+{
+	struct folio *folio = page_folio(page);
+	struct erofs_fscache_priv priv;
+
+	/*
+	 * 1) For FLAT_PLAIN layout, the output map.m_la shall be equal to o_la,
+	 * and the output map.m_pa is exactly the physical address of o_la.
+	 * 2) For CHUNK_BASED layout, the output map.m_la is rounded down to the
+	 * nearest chunk boundary, and the output map.m_pa is actually the
+	 * physical address of this chunk boundary. So we need to recalculate
+	 * the actual physical address of o_la.
+	 */
+	priv.offset = fsmap->m_pa + fsmap->o_la - fsmap->m_la;
+	priv.cookie = fsmap->m_ctx->cookie;
+
+	return netfs_readpage(NULL, folio, &erofs_req_ops, &priv);
+}
+
+static int erofs_fscache_readpage(struct file *file, struct page *page)
+{
+	struct inode *inode = page->mapping->host;
+	struct erofs_inode *vi = EROFS_I(inode);
+	struct super_block *sb = inode->i_sb;
+	struct erofs_sb_info *sbi = EROFS_SB(sb);
+	struct erofs_map_blocks map;
+	struct erofs_fscache_map fsmap;
+	int ret;
+
+	if (erofs_inode_is_data_compressed(vi->datalayout)) {
+		erofs_info(sb, "compressed layout not supported yet");
+		ret = -EOPNOTSUPP;
+		goto err_out;
+	}
+
+	map.m_la = fsmap.o_la = page_offset(page);
+
+	ret = erofs_map_blocks(inode, &map, EROFS_GET_BLOCKS_RAW);
+	if (ret)
+		goto err_out;
+
+	if (!(map.m_flags & EROFS_MAP_MAPPED)) {
+		zero_user(page, 0, PAGE_SIZE);
+		SetPageUptodate(page);
+		unlock_page(page);
+		return 0;
+	}
+
+	fsmap.m_ctx  = sbi->bootstrap;
+	fsmap.m_la   = map.m_la;
+	fsmap.m_pa   = map.m_pa;
+	fsmap.m_llen = map.m_llen;
+
+	switch (vi->datalayout) {
+	case EROFS_INODE_FLAT_PLAIN:
+	case EROFS_INODE_CHUNK_BASED:
+		return erofs_fscache_readpage_noinline(page, &fsmap);
+	default:
+		DBG_BUGON(1);
+		ret = -EOPNOTSUPP;
+	}
+
+err_out:
+	SetPageError(page);
+	unlock_page(page);
+	return ret;
+}
+
+const struct address_space_operations erofs_fscache_access_aops = {
+	.readpage = erofs_fscache_readpage,
+};
 
 static int erofs_fscache_init_cookie(struct erofs_fscache_context *ctx,
 				     char *path)
