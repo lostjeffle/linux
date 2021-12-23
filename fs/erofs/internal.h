@@ -53,6 +53,7 @@ struct erofs_device_info {
 	struct block_device *bdev;
 	struct dax_device *dax_dev;
 	u64 dax_part_off;
+	struct erofs_fscache_context *ctx;
 
 	u32 blocks;
 	u32 mapped_blkaddr;
