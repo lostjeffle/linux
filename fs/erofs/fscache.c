@@ -100,6 +100,45 @@ static int erofs_fscache_readpage_noinline(struct page *page,
 	return netfs_readpage(NULL, folio, &erofs_req_ops, &priv);
 }
 
+static int erofs_fscache_readpage_inline(struct page *page,
+					 struct erofs_fscache_map *fsmap)
+{
+	struct inode *inode = page->mapping->host;
+	struct super_block *sb = inode->i_sb;
+	struct erofs_buf buf = __EROFS_BUF_INITIALIZER;
+	erofs_blk_t blknr;
+	size_t offset, len;
+	void *src, *dst;
+
+	/*
+	 * For inline (tail packing) layout, the offset may be non-zero, while
+	 * the offset can be calculated from corresponding physical address
+	 * directly.
+	 * Currently only flat layout supports inline (FLAT_INLINE), and the
+	 * output map.m_pa is exactly the physical address of o_la in this case.
+	 */
+	offset = erofs_blkoff(fsmap->m_pa);
+	blknr = erofs_blknr(fsmap->m_pa);
+	len = fsmap->m_llen;
+
+	src = erofs_read_metabuf(&buf, sb, blknr, EROFS_KMAP);
+	if (IS_ERR(src)) {
+		SetPageError(page);
+		unlock_page(page);
+		return PTR_ERR(src);
+	}
+
+	dst = kmap(page);
+	memcpy(dst, src + offset, len);
+	kunmap(page);
+
+	erofs_put_metabuf(&buf);
+
+	SetPageUptodate(page);
+	unlock_page(page);
+	return 0;
+}
+
 static int erofs_fscache_readpage(struct file *file, struct page *page)
 {
 	struct inode *inode = page->mapping->host;
@@ -138,6 +177,8 @@ static int erofs_fscache_readpage(struct file *file, struct page *page)
 	case EROFS_INODE_FLAT_PLAIN:
 	case EROFS_INODE_CHUNK_BASED:
 		return erofs_fscache_readpage_noinline(page, &fsmap);
+	case EROFS_INODE_FLAT_INLINE:
+		return erofs_fscache_readpage_inline(page, &fsmap);
 	default:
 		DBG_BUGON(1);
 		ret = -EOPNOTSUPP;
