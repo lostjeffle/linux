@@ -28,9 +28,15 @@ static void erofs_noop_cleanup(struct address_space *mapping, void *netfs_priv)
 {
 }
 
+static void erofs_issue_op(struct netfs_read_subrequest *subreq)
+{
+	netfs_ondemand_read(subreq);
+}
+
 static const struct netfs_read_request_ops erofs_blob_req_ops = {
 	.begin_cache_operation  = erofs_blob_begin_cache_operation,
 	.cleanup		= erofs_noop_cleanup,
+	.issue_op		= erofs_issue_op,
 };
 
 static int erofs_begin_cache_operation(struct netfs_read_request *rreq)
@@ -58,6 +64,7 @@ static const struct netfs_read_request_ops erofs_req_ops = {
 	.begin_cache_operation  = erofs_begin_cache_operation,
 	.cleanup		= erofs_noop_cleanup,
 	.clamp_length		= erofs_clamp_length,
+	.issue_op		= erofs_issue_op,
 };
 
 static int erofs_fscache_blob_readpage(struct file *data, struct page *page)
