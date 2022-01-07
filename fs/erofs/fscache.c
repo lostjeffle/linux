@@ -144,8 +144,8 @@ static int erofs_fscache_readpage(struct file *file, struct page *page)
 	struct inode *inode = page->mapping->host;
 	struct erofs_inode *vi = EROFS_I(inode);
 	struct super_block *sb = inode->i_sb;
-	struct erofs_sb_info *sbi = EROFS_SB(sb);
 	struct erofs_map_blocks map;
+	struct erofs_map_dev mdev;
 	struct erofs_fscache_map fsmap;
 	int ret;
 
@@ -168,9 +168,18 @@ static int erofs_fscache_readpage(struct file *file, struct page *page)
 		return 0;
 	}
 
-	fsmap.m_ctx  = sbi->bootstrap;
+	mdev = (struct erofs_map_dev) {
+		.m_deviceid = map.m_deviceid,
+		.m_pa = map.m_pa,
+	};
+
+	ret = erofs_map_dev(sb, &mdev);
+	if (ret)
+		return ret;
+
+	fsmap.m_ctx  = mdev.m_ctx;
 	fsmap.m_la   = map.m_la;
-	fsmap.m_pa   = map.m_pa;
+	fsmap.m_pa   = mdev.m_pa;
 	fsmap.m_llen = map.m_llen;
 
 	switch (vi->datalayout) {
