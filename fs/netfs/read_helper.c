@@ -181,7 +181,7 @@ static void netfs_read_from_cache(struct netfs_read_request *rreq,
 			subreq->start + subreq->transferred,
 			subreq->len   - subreq->transferred);
 
-	cres->ops->read(cres, subreq->start, &iter, read_hole,
+	cres->ops->read(cres, subreq->p_start, &iter, read_hole,
 			netfs_cache_read_terminated, subreq);
 }
 
@@ -323,7 +323,7 @@ static void netfs_rreq_do_write_to_cache(struct netfs_read_request *rreq)
 			netfs_put_subrequest(next, false);
 		}
 
-		ret = cres->ops->prepare_write(cres, &subreq->start, &subreq->len,
+		ret = cres->ops->prepare_write(cres, &subreq->p_start, &subreq->len,
 					       rreq->i_size, true);
 		if (ret < 0) {
 			trace_netfs_failure(rreq, subreq, ret, netfs_fail_prepare_write);
@@ -338,7 +338,7 @@ static void netfs_rreq_do_write_to_cache(struct netfs_read_request *rreq)
 		netfs_stat(&netfs_n_rh_write);
 		netfs_get_read_subrequest(subreq);
 		trace_netfs_sreq(subreq, netfs_sreq_trace_write);
-		cres->ops->write(cres, subreq->start, &iter,
+		cres->ops->write(cres, subreq->p_start, &iter,
 				 netfs_rreq_copy_terminated, subreq);
 	}
 
@@ -760,6 +760,7 @@ static bool netfs_rreq_submit_slice(struct netfs_read_request *rreq,
 
 	subreq->debug_index	= (*_debug_index)++;
 	subreq->start		= rreq->start + rreq->submitted;
+	subreq->p_start		= rreq->p_start + rreq->submitted;
 	subreq->len		= rreq->len   - rreq->submitted;
 
 	_debug("slice %llx,%zx,%zx", subreq->start, subreq->len, rreq->submitted);
@@ -818,8 +819,12 @@ static void netfs_rreq_expand(struct netfs_read_request *rreq,
 {
 	/* Give the cache a chance to change the request parameters.  The
 	 * resultant request must contain the original region.
+	 * Skip expanding if there may be multi-to-multi mapping between
+	 * backing file and backed file.
 	 */
-	netfs_cache_expand_readahead(rreq, &rreq->start, &rreq->len, rreq->i_size);
+	if (rreq->start == rreq->p_start)
+		netfs_cache_expand_readahead(rreq, &rreq->start, &rreq->len,
+					     rreq->i_size);
 
 	/* Give the netfs a chance to change the request parameters.  The
 	 * resultant request must contain the original region.
@@ -884,6 +889,7 @@ void netfs_readahead(struct readahead_control *ractl,
 		goto cleanup;
 	rreq->mapping	= ractl->mapping;
 	rreq->start	= readahead_pos(ractl);
+	rreq->p_start	= rreq->start;
 	rreq->len	= readahead_length(ractl);
 
 	if (ops->begin_cache_operation) {
@@ -964,6 +970,7 @@ int netfs_readpage(struct file *file,
 	}
 	rreq->mapping	= folio_file_mapping(folio);
 	rreq->start	= folio_file_pos(folio);
+	rreq->p_start	= rreq->start;
 	rreq->len	= folio_size(folio);
 
 	if (ops->begin_cache_operation) {
@@ -1129,6 +1136,7 @@ retry:
 		goto error;
 	rreq->mapping		= folio_file_mapping(folio);
 	rreq->start		= folio_file_pos(folio);
+	rreq->p_start		= rreq->start;
 	rreq->len		= folio_size(folio);
 	rreq->no_unlock_folio	= folio_index(folio);
 	__set_bit(NETFS_RREQ_NO_UNLOCK_FOLIO, &rreq->flags);

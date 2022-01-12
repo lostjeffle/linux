@@ -370,7 +370,7 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 
 	off = cachefiles_inject_read_error();
 	if (off == 0)
-		off = vfs_llseek(file, subreq->start, SEEK_DATA);
+		off = vfs_llseek(file, subreq->p_start, SEEK_DATA);
 	if (off < 0 && off >= (loff_t)-MAX_ERRNO) {
 		if (off == (loff_t)-ENXIO) {
 			why = cachefiles_trace_read_seek_nxio;
@@ -382,21 +382,21 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 		goto out;
 	}
 
-	if (off >= subreq->start + subreq->len) {
+	if (off >= subreq->p_start + subreq->len) {
 		why = cachefiles_trace_read_found_hole;
 		goto download_and_store;
 	}
 
-	if (off > subreq->start) {
+	if (off > subreq->p_start) {
 		off = round_up(off, cache->bsize);
-		subreq->len = off - subreq->start;
+		subreq->len = off - subreq->p_start;
 		why = cachefiles_trace_read_found_part;
 		goto download_and_store;
 	}
 
 	to = cachefiles_inject_read_error();
 	if (to == 0)
-		to = vfs_llseek(file, subreq->start, SEEK_HOLE);
+		to = vfs_llseek(file, subreq->p_start, SEEK_HOLE);
 	if (to < 0 && to >= (loff_t)-MAX_ERRNO) {
 		trace_cachefiles_io_error(object, file_inode(file), to,
 					  cachefiles_trace_seek_error);
@@ -404,12 +404,12 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 		goto out;
 	}
 
-	if (to < subreq->start + subreq->len) {
+	if (to < subreq->p_start + subreq->len) {
 		if (subreq->start + subreq->len >= i_size)
 			to = round_up(to, cache->bsize);
 		else
 			to = round_down(to, cache->bsize);
-		subreq->len = to - subreq->start;
+		subreq->len = to - subreq->p_start;
 	}
 
 	why = cachefiles_trace_read_have_data;
