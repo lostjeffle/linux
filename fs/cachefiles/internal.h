@@ -42,6 +42,7 @@ struct cachefiles_volume {
 	struct fscache_volume		*vcookie;	/* The netfs's representation */
 	struct dentry			*dentry;	/* The volume dentry */
 	struct dentry			*fanout[256];	/* Fanout subdirs */
+	struct file                     *content_map[256]; /* Content map files */
 };
 
 /*

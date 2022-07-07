@@ -292,7 +292,7 @@ retry:
 
 	path.mnt = cache->mnt;
 	path.dentry = dentry;
-	file = open_with_fake_path(&path, O_RDWR | O_LARGEFILE,
+	file = open_with_fake_path(&path, O_RDWR | O_LARGEFILE | O_DSYNC,
 			d_backing_inode(dentry), cache->cache_cred);
 	if (IS_ERR(file))
 		cachefiles_put_directory(dentry);

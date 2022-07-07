@@ -20,6 +20,7 @@ void cachefiles_acquire_volume(struct fscache_volume *vcookie)
 	struct cachefiles_cache *cache = vcookie->cache->cache_priv;
 	const struct cred *saved_cred;
 	struct dentry *vdentry, *fan;
+	struct file *map;
 	size_t len;
 	char *name;
 	bool is_new = false;
@@ -73,6 +74,11 @@ retry:
 		if (IS_ERR(fan))
 			goto error_fan;
 		volume->fanout[i] = fan;
+
+		ret = cachefiles_look_up_map(cache, fan, &map);
+		if (ret)
+			goto error_fan;
+		volume->content_map[i] = map;
 	}
 
 	cachefiles_end_secure(cache, saved_cred);
@@ -91,8 +97,10 @@ retry:
 	return;
 
 error_fan:
-	for (i = 0; i < 256; i++)
+	for (i = 0; i < 256; i++) {
 		cachefiles_put_directory(volume->fanout[i]);
+		cachefiles_put_map(volume->content_map[i]);
+	}
 error_dir:
 	cachefiles_put_directory(volume->dentry);
 error_name:
@@ -113,8 +121,10 @@ static void __cachefiles_free_volume(struct cachefiles_volume *volume)
 
 	volume->vcookie->cache_priv = NULL;
 
-	for (i = 0; i < 256; i++)
+	for (i = 0; i < 256; i++) {
 		cachefiles_put_directory(volume->fanout[i]);
+		cachefiles_put_map(volume->content_map[i]);
+	}
 	cachefiles_put_directory(volume->dentry);
 	kfree(volume);
 }
