@@ -232,6 +232,94 @@ void cachefiles_put_directory(struct dentry *dir)
 }
 
 /*
+ * Look up a content map file.
+ */
+int cachefiles_look_up_map(struct cachefiles_cache *cache,
+			   struct dentry *dir, struct file **pfile)
+{
+	struct dentry *dentry;
+	struct file *file;
+	struct path path;
+	char *name = "Map";
+	int ret;
+
+	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
+retry:
+	ret = cachefiles_inject_read_error();
+	if (ret)
+		goto err_unlock_dir;
+
+	dentry = lookup_one_len(name, dir, strlen(name));
+	if (IS_ERR(dentry)) {
+		ret = PTR_ERR(dentry);
+		goto err_unlock_dir;
+	}
+
+	if (d_is_negative(dentry)) {
+		ret = cachefiles_has_space(cache, 1, 0,
+				cachefiles_has_space_for_create);
+		if (ret)
+			goto err_dput;
+
+		ret = vfs_create(&init_user_ns, d_inode(dir), dentry, S_IFREG, true);
+		if (ret)
+			goto err_dput;
+
+		if (unlikely(d_unhashed(dentry))) {
+			cachefiles_put_directory(dentry);
+			goto retry;
+		}
+		ASSERT(d_backing_inode(dentry));
+	}
+
+	inode_lock(d_inode(dentry));
+	inode_unlock(d_inode(dir));
+
+	if (!__cachefiles_mark_inode_in_use(NULL, dentry)) {
+		inode_unlock(d_inode(dentry));
+		dput(dentry);
+		return -EBUSY;
+	}
+
+	inode_unlock(d_inode(dentry));
+	ASSERT(d_backing_inode(dentry));
+
+	if (!d_is_reg(dentry)) {
+		pr_err("%pd is not a file\n", dentry);
+		cachefiles_put_directory(dentry);
+		return -EIO;
+	}
+
+	path.mnt = cache->mnt;
+	path.dentry = dentry;
+	file = open_with_fake_path(&path, O_RDWR | O_LARGEFILE,
+			d_backing_inode(dentry), cache->cache_cred);
+	if (IS_ERR(file))
+		cachefiles_put_directory(dentry);
+
+	*pfile = file;
+	dput(dentry);
+	return 0;
+
+err_dput:
+	dput(dentry);
+err_unlock_dir:
+	inode_unlock(d_inode(dir));
+	return ret;
+}
+
+/*
+ * Put a content map file.
+ */
+void cachefiles_put_map(struct file *file)
+{
+	if (file) {
+		cachefiles_do_unmark_inode_in_use(NULL, file->f_path.dentry);
+		fput(file);
+	}
+}
+
+/*
  * Remove a regular file from the cache.
  */
 static int cachefiles_unlink(struct cachefiles_cache *cache,

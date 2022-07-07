@@ -270,6 +270,10 @@ extern struct dentry *cachefiles_get_directory(struct cachefiles_cache *cache,
 					       bool *_is_new);
 extern void cachefiles_put_directory(struct dentry *dir);
 
+int cachefiles_look_up_map(struct cachefiles_cache *cache,
+			   struct dentry *dir, struct file **pfile);
+void cachefiles_put_map(struct file *file);
+
 extern int cachefiles_cull(struct cachefiles_cache *cache, struct dentry *dir,
 			   char *filename);
 
