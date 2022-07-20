@@ -220,3 +220,33 @@ void cachefiles_mark_content_map(struct cachefiles_object *object,
 	read_unlock_bh(&object->content_map_lock);
 }
 
+loff_t cachefiles_find_next_granule(struct cachefiles_object *object,
+				    loff_t start)
+{
+	unsigned long size, granule = start / CACHEFILES_GRAN_SIZE;
+	loff_t result;
+
+	read_lock_bh(&object->content_map_lock);
+	size = object->content_map_size * BITS_PER_BYTE;
+	result = find_next_bit(object->content_map, size, granule);
+	read_unlock_bh(&object->content_map_lock);
+
+	if (result == size)
+		return -ENXIO;
+	return result * CACHEFILES_GRAN_SIZE;
+}
+
+loff_t cachefiles_find_next_hole(struct cachefiles_object *object,
+				 loff_t start)
+{
+	unsigned long size, granule = start / CACHEFILES_GRAN_SIZE;
+	loff_t result;
+
+	read_lock_bh(&object->content_map_lock);
+	size = object->content_map_size * BITS_PER_BYTE;
+	result = find_next_zero_bit(object->content_map, size, granule);
+	read_unlock_bh(&object->content_map_lock);
+
+	return min_t(loff_t, result * CACHEFILES_GRAN_SIZE,
+			     object->cookie->object_size);
+}

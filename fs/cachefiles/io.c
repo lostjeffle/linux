@@ -30,6 +30,32 @@ struct cachefiles_kiocb {
 	u64			b_writing;
 };
 
+static loff_t cachefiles_seek_data(struct cachefiles_object *object,
+		struct file *file, loff_t start)
+{
+	switch (object->content_info) {
+	case CACHEFILES_CONTENT_MAP:
+		return cachefiles_find_next_granule(object, start);
+	case CACHEFILES_CONTENT_BACKFS_MAP:
+		return vfs_llseek(file, start, SEEK_DATA);
+	default:
+		return -EINVAL;
+	}
+}
+
+static loff_t cachefiles_seek_hole(struct cachefiles_object *object,
+		struct file *file, loff_t start)
+{
+	switch (object->content_info) {
+	case CACHEFILES_CONTENT_MAP:
+		return cachefiles_find_next_hole(object, start);
+	case CACHEFILES_CONTENT_BACKFS_MAP:
+		return vfs_llseek(file, start, SEEK_HOLE);
+	default:
+		return -EINVAL;
+	}
+}
+
 static inline void cachefiles_put_kiocb(struct cachefiles_kiocb *ki)
 {
 	if (refcount_dec_and_test(&ki->ki_refcnt)) {
@@ -103,7 +129,7 @@ static int cachefiles_read(struct netfs_cache_resources *cres,
 
 		off2 = cachefiles_inject_read_error();
 		if (off2 == 0)
-			off2 = vfs_llseek(file, off, SEEK_DATA);
+			off2 = cachefiles_seek_data(object, file, off);
 		if (off2 < 0 && off2 >= (loff_t)-MAX_ERRNO && off2 != -ENXIO) {
 			skipped = 0;
 			ret = off2;
@@ -442,7 +468,7 @@ static enum netfs_io_source cachefiles_prepare_read(struct netfs_io_subrequest *
 retry:
 	off = cachefiles_inject_read_error();
 	if (off == 0)
-		off = vfs_llseek(file, subreq->start, SEEK_DATA);
+		off = cachefiles_seek_data(object, file, subreq->start);
 	if (off < 0 && off >= (loff_t)-MAX_ERRNO) {
 		if (off == (loff_t)-ENXIO) {
 			why = cachefiles_trace_read_seek_nxio;
@@ -468,7 +494,7 @@ retry:
 
 	to = cachefiles_inject_read_error();
 	if (to == 0)
-		to = vfs_llseek(file, subreq->start, SEEK_HOLE);
+		to = cachefiles_seek_hole(object, file, subreq->start);
 	if (to < 0 && to >= (loff_t)-MAX_ERRNO) {
 		trace_cachefiles_io_error(object, file_inode(file), to,
 					  cachefiles_trace_seek_error);
@@ -537,7 +563,7 @@ int __cachefiles_prepare_write(struct cachefiles_object *object,
 
 	pos = cachefiles_inject_read_error();
 	if (pos == 0)
-		pos = vfs_llseek(file, *_start, SEEK_DATA);
+		pos = cachefiles_seek_data(object, file, *_start);
 	if (pos < 0 && pos >= (loff_t)-MAX_ERRNO) {
 		if (pos == -ENXIO)
 			goto check_space; /* Unallocated tail */
@@ -558,7 +584,7 @@ int __cachefiles_prepare_write(struct cachefiles_object *object,
 
 	pos = cachefiles_inject_read_error();
 	if (pos == 0)
-		pos = vfs_llseek(file, *_start, SEEK_HOLE);
+		pos = cachefiles_seek_hole(object, file, *_start);
 	if (pos < 0 && pos >= (loff_t)-MAX_ERRNO) {
 		trace_cachefiles_io_error(object, file_inode(file), pos,
 					  cachefiles_trace_seek_error);
