@@ -20,6 +20,8 @@
 struct cachefiles_xattr {
 	__be64	object_size;	/* Actual size of the object */
 	__be64	zero_point;	/* Size after which server has no data not written by us */
+	__be64	content_map_off;/* Offset inside the content map file */
+	__be64	content_map_size;/* Size of the content map */
 	__u8	type;		/* Type of object */
 	__u8	content;	/* Content presence (enum cachefiles_content) */
 	__u8	data[];		/* netfs coherency data */
@@ -58,6 +60,8 @@ int cachefiles_set_object_xattr(struct cachefiles_object *object)
 	buf->zero_point		= 0;
 	buf->type		= CACHEFILES_COOKIE_TYPE_DATA;
 	buf->content		= object->content_info;
+	buf->content_map_off	= cpu_to_be64(object->content_map_off);
+	buf->content_map_size	= cpu_to_be64(object->content_map_size);
 	if (test_bit(FSCACHE_COOKIE_LOCAL_WRITE, &object->cookie->flags))
 		buf->content	= CACHEFILES_CONTENT_DIRTY;
 	if (len > 0)
@@ -129,6 +133,11 @@ int cachefiles_check_auxdata(struct cachefiles_object *object, struct file *file
 		pr_warn("Dirty object in cache\n");
 		why = cachefiles_coherency_check_dirty;
 	} else {
+		object->content_info = buf->content;
+		if (object->content_info == CACHEFILES_CONTENT_MAP) {
+			object->content_map_off = be64_to_cpu(buf->content_map_off);
+			object->content_map_size = be64_to_cpu(buf->content_map_size);
+		}
 		why = cachefiles_coherency_check_ok;
 		ret = 0;
 	}

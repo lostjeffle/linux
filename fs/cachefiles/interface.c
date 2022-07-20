@@ -38,6 +38,8 @@ struct cachefiles_object *cachefiles_alloc_object(struct fscache_cookie *cookie)
 	object->volume = volume;
 	object->debug_id = atomic_inc_return(&cachefiles_object_debug_id);
 	object->cookie = fscache_get_cookie(cookie, fscache_cookie_get_attach_object);
+	object->content_map_off = CACHEFILES_CONTENT_MAP_OFF_INVAL;
+	rwlock_init(&object->content_map_lock);
 
 	fscache_count_object(vcookie->cache);
 	trace_cachefiles_ref(object->debug_id, cookie->debug_id, 1,
@@ -88,6 +90,8 @@ void cachefiles_put_object(struct cachefiles_object *object,
 		ASSERTCMP(object->file, ==, NULL);
 
 		kfree(object->d_name);
+		free_pages((unsigned long)object->content_map,
+			   get_order(object->content_map_size));
 
 		cache = object->volume->cache->cache;
 		fscache_put_cookie(object->cookie, fscache_cookie_put_object);
@@ -309,8 +313,10 @@ static void cachefiles_commit_object(struct cachefiles_object *object,
 		update = true;
 	if (test_and_clear_bit(FSCACHE_COOKIE_NEEDS_UPDATE, &object->cookie->flags))
 		update = true;
-	if (update)
+	if (update) {
+		cachefiles_save_content_map(object);
 		cachefiles_set_object_xattr(object);
+	}
 
 	if (test_bit(CACHEFILES_OBJECT_USING_TMPFILE, &object->flags))
 		cachefiles_commit_tmpfile(cache, object);

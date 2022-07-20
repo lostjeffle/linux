@@ -19,6 +19,7 @@
 #include <linux/cachefiles.h>
 
 #define CACHEFILES_DIO_BLOCK_SIZE 4096
+#define CACHEFILES_GRAN_SIZE 4096	/* one bit represents 4K */
 
 struct cachefiles_cache;
 struct cachefiles_object;
@@ -30,6 +31,7 @@ enum cachefiles_content {
 	CACHEFILES_CONTENT_ALL		= 2, /* Content is all present, no map */
 	CACHEFILES_CONTENT_BACKFS_MAP	= 3, /* Content is piecemeal, mapped through backing fs */
 	CACHEFILES_CONTENT_DIRTY	= 4, /* Content is dirty (only seen on disk) */
+	CACHEFILES_CONTENT_MAP		= 5, /* Content is piecemeal, map in use */
 	nr__cachefiles_content
 };
 
@@ -59,6 +61,11 @@ struct cachefiles_object {
 	refcount_t			ref;
 	u8				d_name_len;	/* Length of filename */
 	enum cachefiles_content		content_info:8;	/* Info about content presence */
+	rwlock_t			content_map_lock;
+	void				*content_map;
+	size_t				content_map_size; /* size of content map in bytes */
+	loff_t				content_map_off;  /* offset in the backing content map file */
+#define CACHEFILES_CONTENT_MAP_OFF_INVAL	-1
 	unsigned long			flags;
 #define CACHEFILES_OBJECT_USING_TMPFILE	0		/* Have an unlinked tmpfile */
 #ifdef CONFIG_CACHEFILES_ONDEMAND
@@ -168,6 +175,12 @@ enum cachefiles_has_space_for {
 extern int cachefiles_has_space(struct cachefiles_cache *cache,
 				unsigned fnr, unsigned bnr,
 				enum cachefiles_has_space_for reason);
+
+/*
+ * content-map.c
+ */
+extern int cachefiles_load_content_map(struct cachefiles_object *object);
+extern void cachefiles_save_content_map(struct cachefiles_object *object);
 
 /*
  * daemon.c

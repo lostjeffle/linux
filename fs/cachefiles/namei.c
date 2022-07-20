@@ -690,6 +690,10 @@ static bool cachefiles_open_file(struct cachefiles_object *object,
 	if (ret < 0)
 		goto check_failed;
 
+	ret = cachefiles_load_content_map(object);
+	if (ret < 0)
+		goto check_failed;
+
 	object->file = file;
 
 	/* Always update the atime on an object we've just looked up (this is

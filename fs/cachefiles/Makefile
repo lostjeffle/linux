@@ -13,7 +13,8 @@ cachefiles-y := \
 	namei.o \
 	security.o \
 	volume.o \
-	xattr.o
+	xattr.o \
+	content-map.o
 
 cachefiles-$(CONFIG_CACHEFILES_ERROR_INJECTION) += error_inject.o
 cachefiles-$(CONFIG_CACHEFILES_ONDEMAND) += ondemand.o
