@@ -181,6 +181,8 @@ extern int cachefiles_has_space(struct cachefiles_cache *cache,
  */
 extern int cachefiles_load_content_map(struct cachefiles_object *object);
 extern void cachefiles_save_content_map(struct cachefiles_object *object);
+extern void cachefiles_mark_content_map(struct cachefiles_object *object,
+					loff_t start, loff_t len);
 
 /*
  * daemon.c

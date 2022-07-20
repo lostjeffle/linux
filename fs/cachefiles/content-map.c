@@ -1,7 +1,23 @@
 #include <linux/fs.h>
 #include <linux/namei.h>
 #include <linux/uio.h>
+#include <linux/falloc.h>
 #include "internal.h"
+
+/*
+ * Return the size of the content map in bytes.
+ *
+ * There's one bit per granule (CACHEFILES_GRAN_SIZE, i.e. 4K). We size it in
+ * terms of block size chunks (e.g. 4K), so that the map file can be punched
+ * hole when the content map is truncated or invalidated. In this case, each 4K
+ * chunk spans (4096 * BITS_PER_BYTE * CACHEFILES_GRAN_SIZE, i.e. 128M) of file
+ * space.
+ */
+static size_t cachefiles_map_size(loff_t i_size)
+{
+	i_size = round_up(i_size, PAGE_SIZE * BITS_PER_BYTE * CACHEFILES_GRAN_SIZE);
+	return i_size / BITS_PER_BYTE / CACHEFILES_GRAN_SIZE;
+}
 
 /*
  * Zero the unused tail.
@@ -91,3 +107,116 @@ void cachefiles_save_content_map(struct cachefiles_object *object)
 	if (ret != object->content_map_size)
 		object->content_info = CACHEFILES_CONTENT_NO_DATA;
 }
+
+static loff_t cachefiles_expand_map_off(struct file *file, loff_t old_off,
+					size_t old_size, size_t new_size)
+{
+	struct inode *inode = file_inode(file);
+	loff_t new_off;
+	bool punch = false;
+
+	inode_lock(inode);
+	new_off = i_size_read(inode);
+	/*
+	 * Simply expand the old content map range if possible; or discard the
+	 * old content map range and create a new one.
+	 */
+	if (new_off == old_off + old_size) {
+		i_size_write(inode, old_off + new_size);
+		new_off = old_off;
+	} else {
+		i_size_write(inode, new_off + new_size);
+		punch = true;
+	}
+	inode_unlock(inode);
+
+	if (punch)
+		vfs_fallocate(file, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+			      old_off, old_size);
+
+	return new_off;
+}
+
+/*
+ * Expand the content map to a larger file size.
+ */
+static void cachefiles_expand_content_map(struct cachefiles_object *object)
+{
+	struct file *file = object->volume->content_map[(u8)object->cookie->key_hash];
+	size_t size, zap_size;
+	void *map, *zap;
+	loff_t off;
+
+	size = cachefiles_map_size(object->cookie->object_size);
+	if (size <= object->content_map_size)
+		return;
+
+	map = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, get_order(size));
+	if (!map)
+		return;
+
+	write_lock_bh(&object->content_map_lock);
+	if (size > object->content_map_size) {
+		zap = object->content_map;
+		zap_size = object->content_map_size;
+		memcpy(map, zap, zap_size);
+		object->content_map = map;
+		object->content_map_size = size;
+
+		/* expand the content map file */
+		off = object->content_map_off;
+		if (off != CACHEFILES_CONTENT_MAP_OFF_INVAL)
+			object->content_map_off = cachefiles_expand_map_off(file,
+				off, zap_size, size);
+	} else {
+		zap = map;
+		zap_size = size;
+	}
+	write_unlock_bh(&object->content_map_lock);
+
+	free_pages((unsigned long)zap, get_order(zap_size));
+}
+
+void cachefiles_mark_content_map(struct cachefiles_object *object,
+				 loff_t start, loff_t len)
+{
+	pgoff_t granule;
+	loff_t end = start + len;
+
+	if (object->cookie->advice & FSCACHE_ADV_SINGLE_CHUNK) {
+		if (start == 0) {
+			object->content_info = CACHEFILES_CONTENT_SINGLE;
+			set_bit(FSCACHE_COOKIE_NEEDS_UPDATE, &object->cookie->flags);
+		}
+		return;
+	}
+
+	if (object->content_info == CACHEFILES_CONTENT_NO_DATA)
+		object->content_info = CACHEFILES_CONTENT_MAP;
+
+	/* TODO: set CACHEFILES_CONTENT_BACKFS_MAP accordingly */
+
+	if (object->content_info != CACHEFILES_CONTENT_MAP)
+		return;
+
+	read_lock_bh(&object->content_map_lock);
+	start = round_down(start, CACHEFILES_GRAN_SIZE);
+	do {
+		granule = start / CACHEFILES_GRAN_SIZE;
+		if (granule / BITS_PER_BYTE >= object->content_map_size) {
+			read_unlock_bh(&object->content_map_lock);
+			cachefiles_expand_content_map(object);
+			read_lock_bh(&object->content_map_lock);
+		}
+
+		if (WARN_ON(granule / BITS_PER_BYTE >= object->content_map_size))
+			break;
+
+		set_bit(granule, object->content_map);
+		start += CACHEFILES_GRAN_SIZE;
+	} while (start < end);
+
+	set_bit(FSCACHE_COOKIE_NEEDS_UPDATE, &object->cookie->flags);
+	read_unlock_bh(&object->content_map_lock);
+}
+

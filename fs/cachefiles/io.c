@@ -264,6 +264,9 @@ static void cachefiles_write_complete(struct kiocb *iocb, long ret)
 	__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
 	__sb_end_write(inode->i_sb, SB_FREEZE_WRITE);
 
+	if (ret == ki->len)
+		cachefiles_mark_content_map(ki->object, ki->start, ki->len);
+
 	if (ret < 0)
 		trace_cachefiles_io_error(object, inode, ret,
 					  cachefiles_trace_write_error);
