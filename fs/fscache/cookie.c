@@ -340,7 +340,7 @@ static struct fscache_cookie *fscache_alloc_cookie(
 	cookie->key_len		= index_key_len;
 	cookie->aux_len		= aux_data_len;
 	cookie->object_size	= object_size;
-	if (object_size == 0)
+	if (object_size == 0 && !(advice & FSCACHE_ADV_WANT_CACHE_SIZE))
 		__set_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags);
 
 	if (fscache_set_key(cookie, index_key, index_key_len) < 0)

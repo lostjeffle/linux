@@ -166,12 +166,9 @@ int cachefiles_ondemand_copen(struct cachefiles_cache *cache, char *args)
 
 	cookie = req->object->cookie;
 	cookie->object_size = size;
-	if (size)
-		clear_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags);
-	else
+	if (size == 0)
 		set_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags);
 	trace_cachefiles_ondemand_copen(req->object, id, size);
-
 out:
 	complete(&req->done);
 	return ret;

@@ -255,6 +255,7 @@ static void cachefiles_write_complete(struct kiocb *iocb, long ret)
 {
 	struct cachefiles_kiocb *ki = container_of(iocb, struct cachefiles_kiocb, iocb);
 	struct cachefiles_object *object = ki->object;
+	struct fscache_cookie *cookie = object->cookie;
 	struct inode *inode = file_inode(ki->iocb.ki_filp);
 
 	_enter("%ld", ret);
@@ -269,6 +270,9 @@ static void cachefiles_write_complete(struct kiocb *iocb, long ret)
 
 	atomic_long_sub(ki->b_writing, &object->volume->cache->b_writing);
 	set_bit(FSCACHE_COOKIE_HAVE_DATA, &object->cookie->flags);
+	if (cookie->advice & FSCACHE_ADV_WANT_CACHE_SIZE &&
+	    test_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags))
+		clear_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags);
 	if (ki->term_func)
 		ki->term_func(ki->term_func_priv, ret, ki->was_async);
 	cachefiles_put_kiocb(ki);
@@ -413,13 +417,6 @@ static enum netfs_io_source cachefiles_prepare_read(struct netfs_io_subrequest *
 		goto out_no_object;
 	}
 
-	if (test_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags)) {
-		__set_bit(NETFS_SREQ_COPY_TO_CACHE, &subreq->flags);
-		why = cachefiles_trace_read_no_data;
-		if (!test_bit(NETFS_SREQ_ONDEMAND, &subreq->flags))
-			goto out_no_object;
-	}
-
 	/* The object and the file may be being created in the background. */
 	if (!file) {
 		why = cachefiles_trace_read_no_file;
@@ -434,6 +431,11 @@ static enum netfs_io_source cachefiles_prepare_read(struct netfs_io_subrequest *
 	object = cachefiles_cres_object(cres);
 	cache = object->volume->cache;
 	cachefiles_begin_secure(cache, &saved_cred);
+
+	if (test_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags)) {
+		why = cachefiles_trace_read_no_data;
+		goto download_and_store;
+	}
 retry:
 	off = cachefiles_inject_read_error();
 	if (off == 0)
@@ -510,6 +512,7 @@ int __cachefiles_prepare_write(struct cachefiles_object *object,
 			       bool no_space_allocated_yet)
 {
 	struct cachefiles_cache *cache = object->volume->cache;
+	struct fscache_cookie *cookie = object->cookie;
 	loff_t start = *_start, pos;
 	size_t len = *_len, down;
 	int ret;
@@ -524,6 +527,9 @@ int __cachefiles_prepare_write(struct cachefiles_object *object,
 	 * allocated.
 	 */
 	if (no_space_allocated_yet)
+		goto check_space;
+
+	if (test_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags))
 		goto check_space;
 
 	pos = cachefiles_inject_read_error();
