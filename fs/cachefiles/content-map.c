@@ -250,3 +250,24 @@ loff_t cachefiles_find_next_hole(struct cachefiles_object *object,
 	return min_t(loff_t, result * CACHEFILES_GRAN_SIZE,
 			     object->cookie->object_size);
 }
+
+void cachefiles_invalidate_content_map(struct cachefiles_object *object)
+{
+	struct file *file = object->volume->content_map[(u8)object->cookie->key_hash];
+
+	if (object->content_info != CACHEFILES_CONTENT_MAP)
+		return;
+
+	write_lock_bh(&object->content_map_lock);
+	free_pages((unsigned long)object->content_map,
+		   get_order(object->content_map_size));
+	object->content_map = NULL;
+	object->content_map_size = 0;
+
+	if (object->content_map_off != CACHEFILES_CONTENT_MAP_OFF_INVAL) {
+		vfs_fallocate(file, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+				object->content_map_off, object->content_map_size);
+		object->content_map_off = CACHEFILES_CONTENT_MAP_OFF_INVAL;
+	}
+	write_unlock_bh(&object->content_map_lock);
+}

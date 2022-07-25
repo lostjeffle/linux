@@ -187,6 +187,7 @@ extern loff_t cachefiles_find_next_granule(struct cachefiles_object *object,
 					   loff_t start);
 extern loff_t cachefiles_find_next_hole(struct cachefiles_object *object,
 					loff_t start);
+extern void cachefiles_invalidate_content_map(struct cachefiles_object *object);
 
 /*
  * daemon.c
