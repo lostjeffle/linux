@@ -290,6 +290,7 @@ static void cachefiles_resize_cookie(struct netfs_cache_resources *cres,
 		cachefiles_begin_secure(cache, &saved_cred);
 		cachefiles_shorten_object(object, file, new_size);
 		cachefiles_end_secure(cache, saved_cred);
+		cachefiles_shorten_content_map(object, new_size);
 		object->cookie->object_size = new_size;
 		return;
 	}

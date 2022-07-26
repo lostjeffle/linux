@@ -271,3 +271,26 @@ void cachefiles_invalidate_content_map(struct cachefiles_object *object)
 	}
 	write_unlock_bh(&object->content_map_lock);
 }
+
+/*
+ * Adjust the content map when we shorten a backing object.
+ */
+void cachefiles_shorten_content_map(struct cachefiles_object *object,
+				    loff_t new_size)
+{
+	if (object->content_info != CACHEFILES_CONTENT_MAP)
+		return;
+
+	read_lock_bh(&object->content_map_lock);
+	/*
+	 * Nothing needs to be done when content map has not been allocated yet.
+	 */
+	if (!object->content_map_size)
+		goto out;
+
+	if (cachefiles_map_size(new_size) <= object->content_map_size)
+		cachefiles_zero_content_map(object->content_map,
+				object->content_map_size, new_size);
+out:
+	read_unlock_bh(&object->content_map_lock);
+}
