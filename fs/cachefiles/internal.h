@@ -190,6 +190,8 @@ extern loff_t cachefiles_find_next_hole(struct cachefiles_object *object,
 extern void cachefiles_invalidate_content_map(struct cachefiles_object *object);
 extern void cachefiles_shorten_content_map(struct cachefiles_object *object,
 					   loff_t new_size);
+extern int cachefiles_cull_content_map(struct cachefiles_cache *cache,
+				struct dentry *dir, struct dentry *victim);
 
 /*
  * daemon.c
@@ -384,6 +386,8 @@ extern int cachefiles_remove_object_xattr(struct cachefiles_cache *cache,
 extern void cachefiles_prepare_to_write(struct fscache_cookie *cookie);
 extern bool cachefiles_set_volume_xattr(struct cachefiles_volume *volume);
 extern int cachefiles_check_volume_xattr(struct cachefiles_volume *volume);
+extern int cachefiles_get_content_info(struct dentry *dentry,
+		size_t *content_map_size, loff_t *content_map_off);
 
 /*
  * Error handling

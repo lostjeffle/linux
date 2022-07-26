@@ -283,3 +283,20 @@ int cachefiles_check_volume_xattr(struct cachefiles_volume *volume)
 	_leave(" = %d", ret);
 	return ret;
 }
+
+int cachefiles_get_content_info(struct dentry *dentry, size_t *content_map_size,
+				loff_t *content_map_off)
+{
+	struct cachefiles_xattr buf;
+	ssize_t xlen, tlen = sizeof(buf);
+
+	xlen = vfs_getxattr(&init_user_ns, dentry, cachefiles_xattr_cache, &buf, tlen);
+	if (xlen != tlen)
+		return -ESTALE;
+
+	if (buf.content == CACHEFILES_CONTENT_MAP) {
+		*content_map_off = be64_to_cpu(buf.content_map_off);
+		*content_map_size = be64_to_cpu(buf.content_map_size);
+	}
+	return 0;
+}

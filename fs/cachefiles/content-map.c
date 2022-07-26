@@ -294,3 +294,40 @@ void cachefiles_shorten_content_map(struct cachefiles_object *object,
 out:
 	read_unlock_bh(&object->content_map_lock);
 }
+
+int cachefiles_cull_content_map(struct cachefiles_cache *cache,
+				struct dentry *dir, struct dentry *victim)
+{
+	struct dentry *map;
+	struct file *map_file;
+	size_t content_map_size = 0;
+	loff_t content_map_off = 0;
+	struct path path;
+	int ret;
+
+	if (!d_is_reg(victim))
+		return 0;
+
+	ret = cachefiles_get_content_info(victim, &content_map_size, &content_map_off);
+	if (ret || !content_map_size)
+		return ret;
+
+	map = lookup_positive_unlocked("Map", dir, strlen("Map"));
+	if (IS_ERR(map))
+		return PTR_ERR(map);
+
+	path.mnt = cache->mnt;
+	path.dentry = map;
+	map_file = open_with_fake_path(&path, O_RDWR | O_LARGEFILE,
+			d_backing_inode(map), cache->cache_cred);
+	if (IS_ERR(map_file)) {
+		dput(map);
+		return PTR_ERR(map_file);
+	}
+
+	ret = vfs_fallocate(map_file, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+			      content_map_off, content_map_size);
+
+	fput(map_file);
+	return ret;
+}

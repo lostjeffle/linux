@@ -923,6 +923,10 @@ int cachefiles_cull(struct cachefiles_cache *cache, struct dentry *dir,
 	if (ret < 0)
 		goto error_unlock;
 
+	ret = cachefiles_cull_content_map(cache, dir, victim);
+	if (ret < 0)
+		goto error;
+
 	ret = cachefiles_bury_object(cache, NULL, dir, victim,
 				     FSCACHE_OBJECT_WAS_CULLED);
 	if (ret < 0)
