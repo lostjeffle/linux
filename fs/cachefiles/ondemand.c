@@ -96,7 +96,7 @@ static long cachefiles_ondemand_fd_ioctl(struct file *filp, unsigned int ioctl,
 	if (!req)
 		return -EINVAL;
 
-	trace_cachefiles_ondemand_cread(object, id);
+	trace_cachefiles_ondemand_cread(object, req->msg.object_id);
 	complete(&req->done);
 	return 0;
 }
@@ -170,7 +170,7 @@ int cachefiles_ondemand_copen(struct cachefiles_cache *cache, char *args)
 		clear_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags);
 	else
 		set_bit(FSCACHE_COOKIE_NO_DATA_TO_READ, &cookie->flags);
-	trace_cachefiles_ondemand_copen(req->object, id, size);
+	trace_cachefiles_ondemand_copen(req->object, req->msg.object_id, size);
 
 out:
 	complete(&req->done);
@@ -218,7 +218,7 @@ static int cachefiles_ondemand_get_fd(struct cachefiles_req *req)
 	object->ondemand_id = object_id;
 
 	cachefiles_get_unbind_pincount(cache);
-	trace_cachefiles_ondemand_open(object, &req->msg, load);
+	trace_cachefiles_ondemand_open(object, object_id, load);
 	return 0;
 
 err_put_fd:
@@ -432,7 +432,7 @@ static int cachefiles_ondemand_init_close_req(struct cachefiles_req *req,
 		return -ENOENT;
 
 	req->msg.object_id = object_id;
-	trace_cachefiles_ondemand_close(object, &req->msg);
+	trace_cachefiles_ondemand_close(object, object_id);
 	return 0;
 }
 
@@ -459,7 +459,7 @@ static int cachefiles_ondemand_init_read_req(struct cachefiles_req *req,
 	req->msg.object_id = object_id;
 	load->off = read_ctx->off;
 	load->len = read_ctx->len;
-	trace_cachefiles_ondemand_read(object, &req->msg, load);
+	trace_cachefiles_ondemand_read(object, object_id, load);
 	return 0;
 }
 

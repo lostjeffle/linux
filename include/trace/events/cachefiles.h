@@ -674,14 +674,13 @@ TRACE_EVENT(cachefiles_io_error,
 	    );
 
 TRACE_EVENT(cachefiles_ondemand_open,
-	    TP_PROTO(struct cachefiles_object *obj, struct cachefiles_msg *msg,
+	    TP_PROTO(struct cachefiles_object *obj, int object_id,
 		     struct cachefiles_open *load),
 
-	    TP_ARGS(obj, msg, load),
+	    TP_ARGS(obj, object_id, load),
 
 	    TP_STRUCT__entry(
 		    __field(unsigned int,	obj		)
-		    __field(unsigned int,	msg_id		)
 		    __field(unsigned int,	object_id	)
 		    __field(unsigned int,	fd		)
 		    __field(unsigned int,	flags		)
@@ -689,76 +688,70 @@ TRACE_EVENT(cachefiles_ondemand_open,
 
 	    TP_fast_assign(
 		    __entry->obj	= obj ? obj->debug_id : 0;
-		    __entry->msg_id	= msg->msg_id;
-		    __entry->object_id	= msg->object_id;
+		    __entry->object_id	= object_id;
 		    __entry->fd		= load->fd;
 		    __entry->flags	= load->flags;
 			   ),
 
-	    TP_printk("o=%08x mid=%x oid=%x fd=%d f=%x",
+	    TP_printk("o=%08x oid=%x fd=%d f=%x",
 		      __entry->obj,
-		      __entry->msg_id,
 		      __entry->object_id,
 		      __entry->fd,
 		      __entry->flags)
 	    );
 
 TRACE_EVENT(cachefiles_ondemand_copen,
-	    TP_PROTO(struct cachefiles_object *obj, unsigned int msg_id,
+	    TP_PROTO(struct cachefiles_object *obj, int object_id,
 		     long len),
 
-	    TP_ARGS(obj, msg_id, len),
+	    TP_ARGS(obj, object_id, len),
 
 	    TP_STRUCT__entry(
 		    __field(unsigned int,	obj	)
-		    __field(unsigned int,	msg_id	)
+		    __field(unsigned int,	object_id	)
 		    __field(long,		len	)
 			     ),
 
 	    TP_fast_assign(
 		    __entry->obj	= obj ? obj->debug_id : 0;
-		    __entry->msg_id	= msg_id;
+		    __entry->object_id	= object_id;
 		    __entry->len	= len;
 			   ),
 
-	    TP_printk("o=%08x mid=%x l=%lx",
+	    TP_printk("o=%08x oid=%x l=%lx",
 		      __entry->obj,
-		      __entry->msg_id,
+		      __entry->object_id,
 		      __entry->len)
 	    );
 
 TRACE_EVENT(cachefiles_ondemand_close,
-	    TP_PROTO(struct cachefiles_object *obj, struct cachefiles_msg *msg),
+	    TP_PROTO(struct cachefiles_object *obj, int object_id),
 
-	    TP_ARGS(obj, msg),
+	    TP_ARGS(obj, object_id),
 
 	    TP_STRUCT__entry(
 		    __field(unsigned int,	obj		)
-		    __field(unsigned int,	msg_id		)
 		    __field(unsigned int,	object_id	)
 			     ),
 
 	    TP_fast_assign(
 		    __entry->obj	= obj ? obj->debug_id : 0;
-		    __entry->msg_id	= msg->msg_id;
-		    __entry->object_id	= msg->object_id;
+		    __entry->object_id	= object_id;
 			   ),
 
-	    TP_printk("o=%08x mid=%x oid=%x",
+	    TP_printk("o=%08x oid=%x",
 		      __entry->obj,
-		      __entry->msg_id,
 		      __entry->object_id)
 	    );
 
 TRACE_EVENT(cachefiles_ondemand_read,
-	    TP_PROTO(struct cachefiles_object *obj, struct cachefiles_msg *msg,
+	    TP_PROTO(struct cachefiles_object *obj, int object_id,
 		     struct cachefiles_read *load),
 
-	    TP_ARGS(obj, msg, load),
+	    TP_ARGS(obj, object_id, load),
 
 	    TP_STRUCT__entry(
 		    __field(unsigned int,	obj		)
-		    __field(unsigned int,	msg_id		)
 		    __field(unsigned int,	object_id	)
 		    __field(loff_t,		start		)
 		    __field(size_t,		len		)
@@ -766,38 +759,36 @@ TRACE_EVENT(cachefiles_ondemand_read,
 
 	    TP_fast_assign(
 		    __entry->obj	= obj ? obj->debug_id : 0;
-		    __entry->msg_id	= msg->msg_id;
-		    __entry->object_id	= msg->object_id;
+		    __entry->object_id	= object_id;
 		    __entry->start	= load->off;
 		    __entry->len	= load->len;
 			   ),
 
-	    TP_printk("o=%08x mid=%x oid=%x s=%llx l=%zx",
+	    TP_printk("o=%08x oid=%x s=%llx l=%zx",
 		      __entry->obj,
-		      __entry->msg_id,
 		      __entry->object_id,
 		      __entry->start,
 		      __entry->len)
 	    );
 
 TRACE_EVENT(cachefiles_ondemand_cread,
-	    TP_PROTO(struct cachefiles_object *obj, unsigned int msg_id),
+	    TP_PROTO(struct cachefiles_object *obj, int object_id),
 
-	    TP_ARGS(obj, msg_id),
+	    TP_ARGS(obj, object_id),
 
 	    TP_STRUCT__entry(
-		    __field(unsigned int,	obj	)
-		    __field(unsigned int,	msg_id	)
+		    __field(unsigned int,	obj		)
+		    __field(unsigned int,	object_id	)
 			     ),
 
 	    TP_fast_assign(
 		    __entry->obj	= obj ? obj->debug_id : 0;
-		    __entry->msg_id	= msg_id;
+		    __entry->object_id	= object_id;
 			   ),
 
-	    TP_printk("o=%08x mid=%x",
+	    TP_printk("o=%08x oid=%x",
 		      __entry->obj,
-		      __entry->msg_id)
+		      __entry->object_id)
 	    );
 
 TRACE_EVENT(cachefiles_ondemand_fd_write,
