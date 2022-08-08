@@ -218,7 +218,6 @@ static int cachefiles_ondemand_get_fd(struct cachefiles_req *req)
 	object->ondemand_id = object_id;
 
 	cachefiles_get_unbind_pincount(cache);
-	trace_cachefiles_ondemand_open(object, object_id, load);
 	return 0;
 
 err_put_fd:
@@ -263,13 +262,15 @@ ssize_t cachefiles_ondemand_daemon_read(struct cachefiles_cache *cache,
 	xa_unlock(&cache->reqs);
 
 	id = xas.xa_index;
-	msg->msg_id = id;
 
 	if (msg->opcode == CACHEFILES_OP_OPEN) {
 		ret = cachefiles_ondemand_get_fd(req);
 		if (ret)
 			goto error;
 	}
+
+	msg->msg_id = id;
+	msg->object_id = req->object->ondemand_id;
 
 	if (copy_to_user(_buffer, msg, n) != 0) {
 		ret = -EFAULT;
@@ -294,24 +295,27 @@ error:
 	return ret;
 }
 
-typedef int (*init_req_fn)(struct cachefiles_req *req, void *private);
-
-static int cachefiles_ondemand_send_req(struct cachefiles_object *object,
-					enum cachefiles_opcode opcode,
-					size_t data_len,
-					init_req_fn init_req,
-					void *private)
+static int cachefiles_ondemand_send_check(struct cachefiles_object *object)
 {
 	struct cachefiles_cache *cache = object->volume->cache;
-	struct cachefiles_req *req;
-	XA_STATE(xas, &cache->reqs, 0);
-	int ret;
 
 	if (!test_bit(CACHEFILES_ONDEMAND_MODE, &cache->flags))
 		return 0;
 
 	if (test_bit(CACHEFILES_DEAD, &cache->flags))
 		return -EIO;
+
+	return 1;
+}
+
+static int cachefiles_ondemand_send_req(struct cachefiles_object *object,
+					enum cachefiles_opcode opcode,
+					size_t data_len, void *data)
+{
+	struct cachefiles_cache *cache = object->volume->cache;
+	struct cachefiles_req *req;
+	XA_STATE(xas, &cache->reqs, 0);
+	int ret;
 
 	req = kzalloc(sizeof(*req) + data_len, GFP_KERNEL);
 	if (!req)
@@ -321,10 +325,7 @@ static int cachefiles_ondemand_send_req(struct cachefiles_object *object,
 	init_completion(&req->done);
 	req->msg.opcode = opcode;
 	req->msg.len = sizeof(struct cachefiles_msg) + data_len;
-
-	ret = init_req(req, private);
-	if (ret)
-		goto out;
+	memcpy(req->msg.data, data, data_len);
 
 	do {
 		/*
@@ -382,92 +383,23 @@ out:
 	return ret;
 }
 
-static int cachefiles_ondemand_init_open_req(struct cachefiles_req *req,
-					     void *private)
+int cachefiles_ondemand_init_object(struct cachefiles_object *object)
 {
-	struct cachefiles_object *object = req->object;
 	struct fscache_cookie *cookie = object->cookie;
 	struct fscache_volume *volume = object->volume->vcookie;
-	struct cachefiles_open *load = (void *)req->msg.data;
-	size_t volume_key_size, cookie_key_size;
-	void *volume_key, *cookie_key;
+	char buf[CACHEFILES_MSG_MAX_SIZE];
+	struct cachefiles_open *load;
+	size_t data_len;
+	int ret;
 
-	/*
-	 * Volume key is a NUL-terminated string. key[0] stores strlen() of the
-	 * string, followed by the content of the string (excluding '\0').
-	 */
-	volume_key_size = volume->key[0] + 1;
-	volume_key = volume->key + 1;
-
-	/* Cookie key is binary data, which is netfs specific. */
-	cookie_key_size = cookie->key_len;
-	cookie_key = fscache_get_key(cookie);
+	ret = cachefiles_ondemand_send_check(object);
+	if (ret <= 0)
+		return ret;
 
 	if (!(object->cookie->advice & FSCACHE_ADV_WANT_CACHE_SIZE)) {
 		pr_err("WANT_CACHE_SIZE is needed for on-demand mode\n");
 		return -EINVAL;
 	}
-
-	load->volume_key_size = volume_key_size;
-	load->cookie_key_size = cookie_key_size;
-	memcpy(load->data, volume_key, volume_key_size);
-	memcpy(load->data + volume_key_size, cookie_key, cookie_key_size);
-
-	return 0;
-}
-
-static int cachefiles_ondemand_init_close_req(struct cachefiles_req *req,
-					      void *private)
-{
-	struct cachefiles_object *object = req->object;
-	int object_id = object->ondemand_id;
-
-	/*
-	 * It's possible that object id is still 0 if the cookie looking up
-	 * phase failed before OPEN request has ever been sent. Also avoid
-	 * sending CLOSE request for CACHEFILES_ONDEMAND_ID_CLOSED, which means
-	 * anon_fd has already been closed.
-	 */
-	if (object_id <= 0)
-		return -ENOENT;
-
-	req->msg.object_id = object_id;
-	trace_cachefiles_ondemand_close(object, object_id);
-	return 0;
-}
-
-struct cachefiles_read_ctx {
-	loff_t off;
-	size_t len;
-};
-
-static int cachefiles_ondemand_init_read_req(struct cachefiles_req *req,
-					     void *private)
-{
-	struct cachefiles_object *object = req->object;
-	struct cachefiles_read *load = (void *)req->msg.data;
-	struct cachefiles_read_ctx *read_ctx = private;
-	int object_id = object->ondemand_id;
-
-	/* Stop enqueuing requests when daemon has closed anon_fd. */
-	if (object_id <= 0) {
-		WARN_ON_ONCE(object_id == 0);
-		pr_info_once("READ: anonymous fd closed prematurely.\n");
-		return -EIO;
-	}
-
-	req->msg.object_id = object_id;
-	load->off = read_ctx->off;
-	load->len = read_ctx->len;
-	trace_cachefiles_ondemand_read(object, object_id, load);
-	return 0;
-}
-
-int cachefiles_ondemand_init_object(struct cachefiles_object *object)
-{
-	struct fscache_cookie *cookie = object->cookie;
-	struct fscache_volume *volume = object->volume->vcookie;
-	size_t volume_key_size, cookie_key_size, data_len;
 
 	/*
 	 * CacheFiles will firstly check the cache file under the root cache
@@ -478,27 +410,68 @@ int cachefiles_ondemand_init_object(struct cachefiles_object *object)
 	if (object->ondemand_id > 0)
 		return 0;
 
-	volume_key_size = volume->key[0] + 1;
-	cookie_key_size = cookie->key_len;
-	data_len = sizeof(struct cachefiles_open) +
-		   volume_key_size + cookie_key_size;
+	memset(buf, 0, sizeof(buf));
+	load = (void *)buf;
 
+	/*
+	 * Volume key is a NUL-terminated string. key[0] stores strlen() of
+	 * the string, followed by the content of the string.
+	 */
+	load->volume_key_size = volume->key[0] + 1;
+	memcpy(load->data, volume->key + 1, load->volume_key_size);
+
+	/* Cookie key is binary data, which is netfs specific. */
+	load->cookie_key_size = cookie->key_len;
+	memcpy(load->data + load->volume_key_size, fscache_get_key(cookie),
+	       load->cookie_key_size);
+
+	data_len = sizeof(struct cachefiles_open) +
+		   load->volume_key_size + load->cookie_key_size;
+
+	trace_cachefiles_ondemand_open(object, object->ondemand_id, load);
 	return cachefiles_ondemand_send_req(object, CACHEFILES_OP_OPEN,
-			data_len, cachefiles_ondemand_init_open_req, NULL);
+			data_len, load);
 }
 
 void cachefiles_ondemand_clean_object(struct cachefiles_object *object)
 {
-	cachefiles_ondemand_send_req(object, CACHEFILES_OP_CLOSE, 0,
-			cachefiles_ondemand_init_close_req, NULL);
+	if (cachefiles_ondemand_send_check(object) <= 0)
+		return;
+
+	/*
+	 * It's possible that object id is still 0 if the cookie looking up
+	 * phase failed before OPEN request has ever been sent. Also avoid
+	 * sending CLOSE request for CACHEFILES_ONDEMAND_ID_CLOSED, which means
+	 * anon_fd has already been closed.
+	 */
+	if (object->ondemand_id <= 0)
+		return;
+
+	trace_cachefiles_ondemand_close(object, object->ondemand_id);
+	cachefiles_ondemand_send_req(object, CACHEFILES_OP_CLOSE, 0, NULL);
 }
 
 int cachefiles_ondemand_read(struct cachefiles_object *object,
 			     loff_t pos, size_t len)
 {
-	struct cachefiles_read_ctx read_ctx = {pos, len};
+	struct cachefiles_read load;
+	int ret;
 
+	ret = cachefiles_ondemand_send_check(object);
+	if (ret <= 0)
+		return ret;
+
+	/* Stop enqueuing requests when daemon has closed anon_fd. */
+	if (object->ondemand_id <= 0) {
+		WARN_ON_ONCE(object->ondemand_id == 0);
+		pr_info_once("READ: anonymous fd closed prematurely.\n");
+		return -EIO;
+	}
+
+	load.off = pos;
+	load.len = len;
+
+	trace_cachefiles_ondemand_read(object, object->ondemand_id, &load);
 	return cachefiles_ondemand_send_req(object, CACHEFILES_OP_READ,
-			sizeof(struct cachefiles_read),
-			cachefiles_ondemand_init_read_req, &read_ctx);
+			sizeof(struct cachefiles_read), &load);
 }
