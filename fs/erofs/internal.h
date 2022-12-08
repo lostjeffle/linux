@@ -108,8 +108,7 @@ struct erofs_domain {
 
 struct erofs_fscache {
 	struct fscache_cookie *cookie;
-	struct inode *inode;
-	struct inode *anon_inode;
+	struct inode *inode;	/* anonymous indoe for the blob */
 	struct erofs_domain *domain;
 	char *name;
 };
@@ -604,8 +603,7 @@ static inline int z_erofs_load_lzma_config(struct super_block *sb,
 #endif	/* !CONFIG_EROFS_FS_ZIP */
 
 /* flags for erofs_fscache_register_cookie() */
-#define EROFS_REG_COOKIE_NEED_INODE	1
-#define EROFS_REG_COOKIE_NEED_NOEXIST	2
+#define EROFS_REG_COOKIE_NEED_NOEXIST	1
 
 /* fscache.c */
 #ifdef CONFIG_EROFS_FS_ONDEMAND
