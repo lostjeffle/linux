@@ -4,6 +4,8 @@
  * Copyright (C) 2022, Bytedance Inc. All rights reserved.
  */
 #include <linux/fscache.h>
+#include <linux/file.h>
+#include <linux/anon_inodes.h>
 #include "internal.h"
 
 static DEFINE_MUTEX(erofs_domain_list_lock);
@@ -316,6 +318,8 @@ const struct address_space_operations erofs_fscache_access_aops = {
 	.readahead = erofs_fscache_readahead,
 };
 
+static const struct file_operations erofs_fscache_meta_fops = {};
+
 static void erofs_fscache_domain_put(struct erofs_domain *domain)
 {
 	mutex_lock(&erofs_domain_list_lock);
@@ -428,6 +432,7 @@ struct erofs_fscache *erofs_fscache_acquire_cookie(struct super_block *sb,
 	struct fscache_cookie *cookie;
 	struct super_block *psb = sb;
 	struct inode *inode;
+	struct file *file;
 	int ret;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -457,10 +462,24 @@ struct erofs_fscache *erofs_fscache_acquire_cookie(struct super_block *sb,
 	mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);
 	inode->i_private = ctx;
 
+	if (EROFS_SB(sb)->domain_id) {
+		ihold(inode);
+		file = alloc_file_pseudo(inode, erofs_pseudo_mnt, "[erofs]",
+				O_RDONLY, &erofs_fscache_meta_fops);
+		if (IS_ERR(file)) {
+			ret = PTR_ERR(file);
+			iput(inode);
+			goto err_inode;
+		}
+		ctx->file = file;
+	}
+
 	ctx->cookie = cookie;
 	ctx->inode = inode;
 	return ctx;
 
+err_inode:
+	iput(inode);
 err_cookie:
 	fscache_unuse_cookie(cookie, NULL, NULL);
 	fscache_relinquish_cookie(cookie, false);
@@ -473,6 +492,8 @@ static void erofs_fscache_relinquish_cookie(struct erofs_fscache *ctx)
 {
 	fscache_unuse_cookie(ctx->cookie, NULL, NULL);
 	fscache_relinquish_cookie(ctx->cookie, false);
+	if (ctx->file)
+		fput(ctx->file);
 	iput(ctx->inode);
 	kfree(ctx->name);
 	kfree(ctx);
@@ -565,7 +586,8 @@ void erofs_fscache_unregister_cookie(struct erofs_fscache *ctx)
 		mutex_lock(&erofs_domain_cookies_lock);
 		/* drop the ref for the sentinel in pseudo mount */
 		iput(ctx->inode);
-		drop = atomic_read(&ctx->inode->i_count) == 1;
+		/* one initial ref, and one ref for anonymous file */
+		drop = atomic_read(&ctx->inode->i_count) == 2;
 		if (drop)
 			erofs_fscache_relinquish_cookie(ctx);
 		mutex_unlock(&erofs_domain_cookies_lock);

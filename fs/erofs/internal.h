@@ -109,6 +109,7 @@ struct erofs_domain {
 struct erofs_fscache {
 	struct fscache_cookie *cookie;
 	struct inode *inode;	/* anonymous indoe for the blob */
+	struct file *file;	/* anonymous file */
 	struct erofs_domain *domain;
 	char *name;
 };
