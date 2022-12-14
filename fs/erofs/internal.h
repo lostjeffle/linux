@@ -369,6 +369,29 @@ static inline unsigned int erofs_inode_datalayout(unsigned int value)
 			      EROFS_I_DATALAYOUT_BITS);
 }
 
+static inline bool erofs_can_share_page(struct inode *inode)
+{
+	struct erofs_inode *vi = EROFS_I(inode);
+	struct erofs_sb_info *sbi = EROFS_SB(inode->i_sb);
+
+	/* enable page cache sharing only in share domain mode */
+	if (!erofs_is_fscache_mode(inode->i_sb) || !sbi->domain_id)
+		return false;
+
+	if (vi->datalayout != EROFS_INODE_CHUNK_BASED)
+		return false;
+
+	/* avoid crossing multi devicces/blobs */
+	if (inode->i_size > 1UL << vi->chunkbits)
+		return false;
+
+	/* avoid data leakage in mmap routine */
+	if (EROFS_BLKSIZ % PAGE_SIZE)
+		return false;
+
+	return true;
+}
+
 /*
  * Different from grab_cache_page_nowait(), reclaiming is never triggered
  * when allocating new pages.
