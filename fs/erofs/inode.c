@@ -241,6 +241,29 @@ static int erofs_fill_symlink(struct inode *inode, void *kaddr,
 	return 0;
 }
 
+static bool erofs_can_share_page_cache(struct inode *inode)
+{
+	struct erofs_inode *vi = EROFS_I(inode);
+
+	if (!erofs_is_fscache_mode(inode->i_sb))
+		return false;
+
+	/* enable page cache sharing only in share domain mode */
+	if (vi->datalayout != EROFS_INODE_CHUNK_BASED ||
+	    !EROFS_SB(inode->i_sb)->domain_id)
+		return false;
+
+	/* avoid data leakage in mmap routine */
+	if (EROFS_BLKSIZ % PAGE_SIZE)
+		return false;
+
+	/* avoid crossing multi devicces/blobs */
+	if (inode->i_size > 1UL << vi->chunkbits)
+		return false;
+
+	return true;
+}
+
 static int erofs_fill_inode(struct inode *inode)
 {
 	struct erofs_inode *vi = EROFS_I(inode);
@@ -262,6 +285,10 @@ static int erofs_fill_inode(struct inode *inode)
 		inode->i_op = &erofs_generic_iops;
 		if (erofs_inode_is_data_compressed(vi->datalayout))
 			inode->i_fop = &generic_ro_fops;
+#ifdef CONFIG_EROFS_FS_ONDEMAND
+		else if (erofs_can_share_page_cache(inode))
+			inode->i_fop = &erofs_fscache_share_file_fops;
+#endif
 		else
 			inode->i_fop = &erofs_file_fops;
 		break;
