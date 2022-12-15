@@ -395,8 +395,31 @@ static int erofs_fscache_share_file_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+static ssize_t erofs_fscache_share_file_read_iter(struct kiocb *iocb,
+						  struct iov_iter *iter)
+{
+	struct file *realfile = iocb->ki_filp->private_data;
+	struct erofs_fscache_finfo *finfo = realfile->private_data;
+	ssize_t res;
+
+	if (!iov_iter_count(iter))
+		return 0;
+
+	if (!is_sync_kiocb(iocb))
+		return filemap_read(iocb, iter, 0);
+
+	iov_iter_truncate(iter, file_inode(iocb->ki_filp)->i_size - iocb->ki_pos);
+	iocb->ki_filp = realfile;
+	iocb->ki_pos += finfo->pa;
+
+	res = filemap_read(iocb, iter, 0);
+	iocb->ki_pos -= finfo->pa;
+	return res;
+}
+
 const struct file_operations erofs_fscache_share_file_fops = {
 	.llseek		= generic_file_llseek,
+	.read_iter	= erofs_fscache_share_file_read_iter,
 	.open		= erofs_fscache_share_file_open,
 	.release	= erofs_fscache_share_file_release,
 };
