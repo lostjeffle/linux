@@ -320,6 +320,86 @@ const struct address_space_operations erofs_fscache_access_aops = {
 
 static const struct file_operations erofs_fscache_meta_fops = {};
 
+static int erofs_fscache_share_map(struct inode *inode,
+		struct erofs_fscache **ctx, erofs_off_t *pa)
+{
+	struct super_block *sb = inode->i_sb;
+	struct erofs_map_blocks map = {}; /* .m_la = 0 */
+	struct erofs_map_dev mdev;
+	int ret;
+
+	ret = erofs_map_blocks(inode, &map, EROFS_GET_BLOCKS_RAW);
+	if (ret)
+		return ret;
+
+	mdev = (struct erofs_map_dev) {
+		.m_deviceid = map.m_deviceid,
+		.m_pa = map.m_pa,
+	};
+	ret = erofs_map_dev(sb, &mdev);
+	if (ret)
+		return ret;
+
+	*ctx = mdev.m_fscache;
+	*pa  = mdev.m_pa;
+	return 0;
+}
+
+static ssize_t erofs_fscache_share_file_read_iter(struct kiocb *iocb,
+						  struct iov_iter *to)
+{
+	struct file *filp = iocb->ki_filp;
+	struct inode *inode = file_inode(filp);
+	struct erofs_fscache *ctx;
+	erofs_off_t pa;
+	struct folio *folio;
+	ssize_t already_read = 0;
+	int ret = 0;
+
+	/* no need taking (shared) inode lock since it's a ro filesystem */
+	if (!iov_iter_count(to))
+		return 0;
+
+	if (IS_DAX(inode) || iocb->ki_flags & IOCB_DIRECT)
+		return -EOPNOTSUPP;
+
+	ret = erofs_fscache_share_map(inode, &ctx, &pa);
+	if (ret)
+		return ret;
+
+	do {
+		size_t bytes, copied, offset, fsize;
+		pgoff_t index = (pa >> PAGE_SHIFT) + (iocb->ki_pos >> PAGE_SHIFT);
+
+		folio = read_cache_folio(ctx->inode->i_mapping, index, NULL, NULL);
+		if (IS_ERR(folio)) {
+			ret = PTR_ERR(folio);
+			break;
+		}
+
+		fsize = folio_size(folio);
+		offset = iocb->ki_pos & (fsize - 1);
+		bytes = min_t(size_t, inode->i_size - iocb->ki_pos, iov_iter_count(to));
+		bytes = min_t(size_t, bytes, fsize - offset);
+		copied = copy_folio_to_iter(folio, offset, bytes, to);
+		folio_put(folio);
+		iocb->ki_pos += copied;
+		already_read += copied;
+		if (copied < bytes) {
+			ret = -EFAULT;
+			break;
+		}
+	} while (iov_iter_count(to) && iocb->ki_pos < inode->i_size);
+
+	file_accessed(filp);
+	return already_read ? already_read : ret;
+}
+
+const struct file_operations erofs_fscache_share_file_fops = {
+	.llseek		= generic_file_llseek,
+	.read_iter	= erofs_fscache_share_file_read_iter,
+};
+
 static void erofs_fscache_domain_put(struct erofs_domain *domain)
 {
 	mutex_lock(&erofs_domain_list_lock);
