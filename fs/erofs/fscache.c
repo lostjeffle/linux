@@ -395,9 +395,60 @@ static ssize_t erofs_fscache_share_file_read_iter(struct kiocb *iocb,
 	return already_read ? already_read : ret;
 }
 
+static vm_fault_t erofs_fscache_share_fault(struct vm_fault *vmf)
+{
+	struct inode *inode = vmf->vma->vm_file->f_inode;
+	pgoff_t index = vmf->pgoff;
+	struct folio *folio;
+
+	folio = read_cache_folio(inode->i_mapping, index, NULL, NULL);
+	if (IS_ERR(folio))
+		return VM_FAULT_OOM;
+
+	if (!folio_trylock(folio))
+		return VM_FAULT_RETRY;
+
+	vmf->page = folio_file_page(folio, index);
+	return VM_FAULT_LOCKED;
+}
+
+static const struct vm_operations_struct erofs_fscache_share_file_vm_ops = {
+	.fault		= erofs_fscache_share_fault,
+};
+
+static int erofs_fscache_share_file_mmap(struct file *file,
+					 struct vm_area_struct *vma)
+{
+	pgoff_t end_index, max_index;
+	struct erofs_fscache *ctx;
+	erofs_off_t pa;
+	int ret;
+
+	/* doesn't support private mapping yet */
+	if (!(vma->vm_flags & VM_MAYSHARE))
+		return generic_file_readonly_mmap(file, vma);
+
+	end_index = vma->vm_pgoff + vma_pages(vma);
+	max_index = DIV_ROUND_UP(file_inode(file)->i_size, PAGE_SIZE);
+	if (end_index > max_index)
+		return -EINVAL;
+
+	ret = erofs_fscache_share_map(file_inode(file), &ctx, &pa);
+	if (ret)
+		return ret;
+
+	vma_set_file(vma, ctx->file);
+	vma->vm_pgoff = pa >> PAGE_SHIFT;
+	vma->vm_ops = &erofs_fscache_share_file_vm_ops;
+
+	file_accessed(file);
+	return 0;
+}
+
 const struct file_operations erofs_fscache_share_file_fops = {
 	.llseek		= generic_file_llseek,
 	.read_iter	= erofs_fscache_share_file_read_iter,
+	.mmap		= erofs_fscache_share_file_mmap,
 };
 
 static void erofs_fscache_domain_put(struct erofs_domain *domain)
