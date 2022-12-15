@@ -417,9 +417,36 @@ static ssize_t erofs_fscache_share_file_read_iter(struct kiocb *iocb,
 	return res;
 }
 
+vm_fault_t erofs_fscache_share_fault(struct vm_fault *vmf)
+{
+	struct erofs_fscache_finfo *finfo = vmf->vma->vm_file->private_data;
+
+	if (unlikely(vmf->pgoff >= finfo->max_idx))
+		return VM_FAULT_SIGBUS;
+	return filemap_fault(vmf);
+}
+
+static const struct vm_operations_struct erofs_fscache_share_file_vm_ops = {
+	.fault = erofs_fscache_share_fault,
+};
+
+static int erofs_fscache_share_file_mmap(struct file *file,
+					 struct vm_area_struct *vma)
+{
+	struct file *realfile = file->private_data;
+	struct erofs_fscache_finfo *finfo = realfile->private_data;
+
+	vma_set_file(vma, realfile);
+	vma->vm_pgoff = (finfo->pa >> PAGE_SHIFT) + vma->vm_pgoff;
+	vma->vm_ops = &erofs_fscache_share_file_vm_ops;
+	file_accessed(file);
+	return 0;
+}
+
 const struct file_operations erofs_fscache_share_file_fops = {
 	.llseek		= generic_file_llseek,
 	.read_iter	= erofs_fscache_share_file_read_iter,
+	.mmap		= erofs_fscache_share_file_mmap,
 	.open		= erofs_fscache_share_file_open,
 	.release	= erofs_fscache_share_file_release,
 };
