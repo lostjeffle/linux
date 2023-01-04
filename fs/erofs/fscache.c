@@ -276,8 +276,13 @@ static int erofs_fscache_data_read(struct erofs_fscache_request *req)
 static int erofs_fscache_read_folio(struct file *file, struct folio *folio)
 {
 	struct erofs_fscache_request *req;
+	struct inode *inode = folio_mapping(folio)->host;
 	int ret;
 
+	printk("[%s %d] sb %px, inode %px (%d), pos %llx, len %lx\n",
+			__func__, __LINE__, inode->i_sb, inode, inode->i_mode & S_IFMT,
+			folio_pos(folio), folio_size(folio));
+	dump_stack();
 	req = erofs_fscache_req_alloc(folio_mapping(folio),
 			folio_pos(folio), folio_size(folio));
 	if (IS_ERR(req)) {
@@ -293,7 +298,12 @@ static int erofs_fscache_read_folio(struct file *file, struct folio *folio)
 static void erofs_fscache_readahead(struct readahead_control *rac)
 {
 	struct erofs_fscache_request *req;
+	struct inode *inode = rac->mapping->host;
 
+	printk("[%s %d] sb %px, inode %px (%d), pos %llx, len %lx, i_fop %px, erofs_fscache_share_file_fops %px, erofs_file_fops %px, generic_ro_fops %px\n",
+			__func__, __LINE__, inode->i_sb, inode, inode->i_mode & S_IFMT,
+			readahead_pos(rac), readahead_length(rac), inode->i_fop, &erofs_fscache_share_file_fops, &erofs_file_fops, &generic_ro_fops);
+	dump_stack();
 	if (!readahead_count(rac))
 		return;
 
@@ -435,9 +445,10 @@ static int erofs_fscache_share_file_mmap(struct file *file,
 	int ret;
 
 	/* doesn't support private mapping yet */
-	if (!(vma->vm_flags & VM_MAYSHARE))
+	if (!(vma->vm_flags & VM_MAYSHARE)) {
+		printk("[%s] inode %px\n", __func__, file->f_inode);
 		return generic_file_readonly_mmap(file, vma);
-
+	}
 	end_index = vma->vm_pgoff + vma_pages(vma);
 	max_index = DIV_ROUND_UP(file_inode(file)->i_size, PAGE_SIZE);
 	if (end_index > max_index)
