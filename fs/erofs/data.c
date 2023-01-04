@@ -390,6 +390,8 @@ static ssize_t erofs_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 		return iomap_dio_rw(iocb, to, &erofs_iomap_ops,
 				    NULL, 0, NULL, 0);
 	}
+	printk("[%s %d] sb %px, inode %px, pos %llx, len %lx\n",
+			__func__, __LINE__, inode->i_sb, inode, iocb->ki_pos, iov_iter_count(to));
 	return filemap_read(iocb, to, 0);
 }
 

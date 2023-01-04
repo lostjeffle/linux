@@ -6,6 +6,7 @@
 #include <linux/fscache.h>
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
+#include <linux/fscache-cache.h>
 #include "internal.h"
 
 static DEFINE_MUTEX(erofs_domain_list_lock);
@@ -355,6 +356,7 @@ static ssize_t erofs_fscache_share_file_read_iter(struct kiocb *iocb,
 	struct folio *folio;
 	ssize_t already_read = 0;
 	int ret = 0;
+	char key[128];
 
 	/* no need taking (shared) inode lock since it's a ro filesystem */
 	if (!iov_iter_count(to))
@@ -367,10 +369,13 @@ static ssize_t erofs_fscache_share_file_read_iter(struct kiocb *iocb,
 	if (ret)
 		return ret;
 
+	snprintf(key, ctx->cookie->key_len + 1, "%s", (char *)fscache_get_key(ctx->cookie));
 	do {
 		size_t bytes, copied, offset, fsize;
 		pgoff_t index = (pa >> PAGE_SHIFT) + (iocb->ki_pos >> PAGE_SHIFT);
 
+		printk("[%s %d] sb %px, blob (%s) inode %px, index %lx\n",
+			__func__, __LINE__, inode->i_sb, key, ctx->inode, index);
 		folio = read_cache_folio(ctx->inode->i_mapping, index, NULL, NULL);
 		if (IS_ERR(folio)) {
 			ret = PTR_ERR(folio);
@@ -400,7 +405,12 @@ static vm_fault_t erofs_fscache_share_fault(struct vm_fault *vmf)
 	struct inode *inode = vmf->vma->vm_file->f_inode;
 	pgoff_t index = vmf->pgoff;
 	struct folio *folio;
+	char key[128];
+	struct erofs_fscache *ctx = inode->i_private;
 
+	snprintf(key, ctx->cookie->key_len + 1, "%s", (char *)fscache_get_key(ctx->cookie));
+	printk("[%s %d] sb %px, blob (%s) inode %px, index %lx\n",
+			__func__, __LINE__, inode->i_sb, key, ctx->inode, index);
 	folio = read_cache_folio(inode->i_mapping, index, NULL, NULL);
 	if (IS_ERR(folio))
 		return VM_FAULT_OOM;

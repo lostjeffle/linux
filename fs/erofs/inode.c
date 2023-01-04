@@ -254,20 +254,26 @@ static bool erofs_check_chunks(struct inode *inode)
 	u64 chunknr;
 	int last_deviceid = -1, deviceid;
 
-	if (WARN_ON(!(vi->chunkformat & EROFS_CHUNK_FORMAT_INDEXES)))
+	if (WARN_ON(!(vi->chunkformat & EROFS_CHUNK_FORMAT_INDEXES))) {
+		printk("[%s %d] can not share\n", __func__, __LINE__);
 		return false;
+	}
 
 	while (la < inode->i_size) {
 		chunknr = la >> vi->chunkbits;
 		pos = ALIGN(iloc(EROFS_SB(sb), vi->nid) + vi->inode_isize +
 				vi->xattr_isize, unit) + unit * chunknr;
 		kaddr = erofs_read_metabuf(&buf, sb, erofs_blknr(pos), EROFS_KMAP);
-		if (IS_ERR(kaddr))
+		if (IS_ERR(kaddr)) {
+			printk("[%s %d] can not share\n", __func__, __LINE__);
 			goto out;
+		}
 
 		idx = kaddr + erofs_blkoff(pos);
-		if (WARN_ON(le32_to_cpu(idx->blkaddr) == EROFS_NULL_ADDR))
+		if (WARN_ON(le32_to_cpu(idx->blkaddr) == EROFS_NULL_ADDR)) {
+			printk("[%s %d] can not share\n", __func__, __LINE__);
 			goto out;
+		}
 
 		deviceid = le16_to_cpu(idx->device_id) & EROFS_SB(sb)->device_id_mask;
 		if (last_deviceid < 0)
@@ -284,6 +290,7 @@ static bool erofs_check_chunks(struct inode *inode)
 	return true;
 out:
 	erofs_put_metabuf(&buf);
+	printk("[%s %d] can not share\n", __func__, __LINE__);
 	return false;
 }
 
@@ -291,13 +298,17 @@ static bool erofs_can_share_page_cache(struct inode *inode)
 {
 	struct erofs_inode *vi = EROFS_I(inode);
 
-	if (!erofs_is_fscache_mode(inode->i_sb))
+	if (!erofs_is_fscache_mode(inode->i_sb)) {
+		printk("[%s %d] can not share\n", __func__, __LINE__);
 		return false;
+	}
 
 	/* enable page cache sharing only in share domain mode */
 	if (vi->datalayout != EROFS_INODE_CHUNK_BASED ||
-	    !EROFS_SB(inode->i_sb)->domain_id)
+	    !EROFS_SB(inode->i_sb)->domain_id) {
+		printk("[%s %d] can not share\n", __func__, __LINE__);
 		return false;
+	}
 
 	/* avoid data leakage in mmap routine */
 	if (EROFS_BLKSIZ % PAGE_SIZE)
