@@ -60,6 +60,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	show_val_kb(m, "MemAvailable:   ", available);
 	show_val_kb(m, "Buffers:        ", i.bufferram);
 	show_val_kb(m, "Cached:         ", cached);
+	show_val_kb(m, "EROFSCached:    ", global_node_page_state(NR_FILE_PAGES_EROFS));
 	show_val_kb(m, "SwapCached:     ", total_swapcache_pages());
 	show_val_kb(m, "Active:         ", pages[LRU_ACTIVE_ANON] +
 					   pages[LRU_ACTIVE_FILE]);

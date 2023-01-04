@@ -181,6 +181,10 @@ static void filemap_unaccount_folio(struct address_space *mapping,
 	nr = folio_nr_pages(folio);
 
 	__lruvec_stat_mod_folio(folio, NR_FILE_PAGES, -nr);
+	if (mapping->host && mapping->host->i_sb) {
+		if (mapping->host->i_sb->s_magic == 0xE0F5E1E2)
+			__lruvec_stat_mod_folio(folio, NR_FILE_PAGES_EROFS, -nr);
+	}
 	if (folio_test_swapbacked(folio)) {
 		__lruvec_stat_mod_folio(folio, NR_SHMEM, -nr);
 		if (folio_test_pmd_mappable(folio))
@@ -902,6 +906,10 @@ noinline int __filemap_add_folio(struct address_space *mapping,
 		/* hugetlb pages do not participate in page cache accounting */
 		if (!huge) {
 			__lruvec_stat_mod_folio(folio, NR_FILE_PAGES, nr);
+			if (mapping->host && mapping->host->i_sb) {
+				if (mapping->host->i_sb->s_magic == 0xE0F5E1E2)
+					__lruvec_stat_mod_folio(folio, NR_FILE_PAGES_EROFS, nr);
+			}
 			if (folio_test_pmd_mappable(folio))
 				__lruvec_stat_mod_folio(folio,
 						NR_FILE_THPS, nr);
