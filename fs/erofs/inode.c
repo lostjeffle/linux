@@ -241,6 +241,52 @@ static int erofs_fill_symlink(struct inode *inode, void *kaddr,
 	return 0;
 }
 
+static bool erofs_check_chunks(struct inode *inode)
+{
+	struct super_block *sb = inode->i_sb;
+	struct erofs_inode *vi = EROFS_I(inode);
+	struct erofs_buf buf = __EROFS_BUF_INITIALIZER;
+	unsigned int unit = sizeof(struct erofs_inode_chunk_index);
+	struct erofs_inode_chunk_index *idx;
+	erofs_off_t pos;
+	void *kaddr;
+	erofs_off_t la = 0;
+	u64 chunknr;
+	int last_deviceid = -1, deviceid;
+
+	if (WARN_ON(!(vi->chunkformat & EROFS_CHUNK_FORMAT_INDEXES)))
+		return false;
+
+	while (la < inode->i_size) {
+		chunknr = la >> vi->chunkbits;
+		pos = ALIGN(iloc(EROFS_SB(sb), vi->nid) + vi->inode_isize +
+				vi->xattr_isize, unit) + unit * chunknr;
+		kaddr = erofs_read_metabuf(&buf, sb, erofs_blknr(pos), EROFS_KMAP);
+		if (IS_ERR(kaddr))
+			goto out;
+
+		idx = kaddr + erofs_blkoff(pos);
+		if (WARN_ON(le32_to_cpu(idx->blkaddr) == EROFS_NULL_ADDR))
+			goto out;
+
+		deviceid = le16_to_cpu(idx->device_id) & EROFS_SB(sb)->device_id_mask;
+		if (last_deviceid < 0)
+			last_deviceid = deviceid;
+		if (last_deviceid != deviceid) {
+			printk("[erofs_check_chunks]: i_size %lld, false\n", inode->i_size);
+			goto out;
+		}
+
+		la += (1 << vi->chunkbits);
+	}
+	erofs_put_metabuf(&buf);
+	printk("[erofs_check_chunks]: i_size %lld, true\n", inode->i_size);
+	return true;
+out:
+	erofs_put_metabuf(&buf);
+	return false;
+}
+
 static bool erofs_can_share_page_cache(struct inode *inode)
 {
 	struct erofs_inode *vi = EROFS_I(inode);
@@ -258,10 +304,10 @@ static bool erofs_can_share_page_cache(struct inode *inode)
 		return false;
 
 	/* avoid crossing multi devicces/blobs */
-	if (inode->i_size > 1UL << vi->chunkbits)
-		return false;
+	if (inode->i_size <= 1UL << vi->chunkbits)
+		return true;
 
-	return true;
+	return erofs_check_chunks(inode);
 }
 
 static int erofs_fill_inode(struct inode *inode)
