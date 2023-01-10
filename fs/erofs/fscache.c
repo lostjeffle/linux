@@ -4,6 +4,8 @@
  * Copyright (C) 2022, Bytedance Inc. All rights reserved.
  */
 #include <linux/fscache.h>
+#include <linux/file.h>
+#include <linux/anon_inodes.h>
 #include "internal.h"
 
 static DEFINE_MUTEX(erofs_domain_list_lock);
@@ -20,6 +22,11 @@ struct erofs_fscache_request {
 	size_t			submitted;	/* Length of submitted */
 	short			error;		/* 0 or error that occurred */
 	refcount_t		ref;
+};
+
+struct erofs_fscache_finfo {
+	erofs_off_t pa;
+	pgoff_t max_idx;
 };
 
 static struct erofs_fscache_request *erofs_fscache_req_alloc(struct address_space *mapping,
@@ -331,6 +338,67 @@ static const struct address_space_operations erofs_fscache_meta_aops = {
 const struct address_space_operations erofs_fscache_access_aops = {
 	.read_folio = erofs_fscache_read_folio,
 	.readahead = erofs_fscache_readahead,
+};
+
+static int erofs_fscache_share_meta_release(struct inode *inode, struct file *filp)
+{
+	kfree(filp->private_data);
+	filp->private_data = NULL;
+	return 0;
+}
+
+static const struct file_operations erofs_fscache_share_meta_fops = {
+	.release	= erofs_fscache_share_meta_release,
+};
+
+static int erofs_fscache_share_file_release(struct inode *inode, struct file *filp)
+{
+	fput(filp->private_data);
+	filp->private_data = NULL;
+	return 0;
+}
+
+static int erofs_fscache_share_file_open(struct inode *inode, struct file *filp)
+{
+	struct erofs_fscache_finfo *finfo;
+	struct erofs_map_blocks map;
+	struct erofs_map_dev mdev;
+	struct inode *realinode;
+	struct file *realfile;
+	int ret;
+
+	/* since page cache sharing is enabled only when i_size <= chunk_size */
+	map.m_la = 0;
+	ret = erofs_map(inode, &map, &mdev);
+	if (ret)
+		return ret;
+
+	finfo = kzalloc(sizeof(struct erofs_fscache_finfo), GFP_KERNEL);
+	if (!finfo)
+		return -ENOMEM;
+	finfo->pa = mdev.m_pa;
+	finfo->max_idx = DIV_ROUND_UP(mdev.m_pa + inode->i_size, PAGE_SIZE);
+
+	realinode = mdev.m_fscache->inode;
+	ihold(realinode);
+	realfile = alloc_file_pseudo(realinode, filp->f_path.mnt, "[erofs]",
+				     O_RDONLY, &erofs_fscache_share_meta_fops);
+	if (IS_ERR(realfile)) {
+		iput(realinode);
+		kfree(finfo);
+		return PTR_ERR(realfile);
+	}
+
+	file_ra_state_init(&realfile->f_ra, filp->f_mapping);
+	realfile->private_data = finfo;
+	filp->private_data = realfile;
+	return 0;
+}
+
+const struct file_operations erofs_fscache_share_file_fops = {
+	.llseek		= generic_file_llseek,
+	.open		= erofs_fscache_share_file_open,
+	.release	= erofs_fscache_share_file_release,
 };
 
 static void erofs_fscache_domain_put(struct erofs_domain *domain)
