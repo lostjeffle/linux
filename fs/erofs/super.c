@@ -456,6 +456,7 @@ enum {
 	Opt_device,
 	Opt_fsid,
 	Opt_domain_id,
+	Opt_sharecache,
 	Opt_err
 };
 
@@ -482,6 +483,7 @@ static const struct fs_parameter_spec erofs_fs_parameters[] = {
 	fsparam_string("device",	Opt_device),
 	fsparam_string("fsid",		Opt_fsid),
 	fsparam_string("domain_id",	Opt_domain_id),
+	fsparam_flag_no("sharecache",	Opt_sharecache),
 	{}
 };
 
@@ -590,9 +592,16 @@ static int erofs_fc_parse_param(struct fs_context *fc,
 		if (!ctx->domain_id)
 			return -ENOMEM;
 		break;
+	case Opt_sharecache:
+		if (result.boolean)
+			set_opt(&ctx->opt, SHARE_CACHE);
+		else
+			clear_opt(&ctx->opt, SHARE_CACHE);
+		break;
 #else
 	case Opt_fsid:
 	case Opt_domain_id:
+	case Opt_sharecache:
 		errorfc(fc, "%s option not supported", erofs_fs_parameters[opt].name);
 		break;
 #endif
@@ -1108,6 +1117,10 @@ static int erofs_show_options(struct seq_file *seq, struct dentry *root)
 		seq_printf(seq, ",fsid=%s", sbi->fsid);
 	if (sbi->domain_id)
 		seq_printf(seq, ",domain_id=%s", sbi->domain_id);
+	if (test_opt(opt, SHARE_CACHE))
+		seq_puts(seq, ",sharecache");
+	else
+		seq_puts(seq, ",nosharecache");
 #endif
 	return 0;
 }

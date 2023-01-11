@@ -374,6 +374,9 @@ static inline bool erofs_can_share_page(struct inode *inode)
 	struct erofs_inode *vi = EROFS_I(inode);
 	struct erofs_sb_info *sbi = EROFS_SB(inode->i_sb);
 
+	if (!test_opt(&sbi->opt, SHARE_CACHE))
+		return false;
+
 	/* enable page cache sharing only in share domain mode */
 	if (!erofs_is_fscache_mode(inode->i_sb) || !sbi->domain_id)
 		return false;
