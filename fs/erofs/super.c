@@ -445,6 +445,7 @@ static void erofs_default_options(struct erofs_fs_context *ctx)
 #ifdef CONFIG_EROFS_FS_POSIX_ACL
 	set_opt(&ctx->opt, POSIX_ACL);
 #endif
+	set_opt(&ctx->opt, SHARE_CACHE);
 }
 
 enum {
