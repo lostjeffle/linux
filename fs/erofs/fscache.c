@@ -6,12 +6,13 @@
 #include <linux/fscache.h>
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
+#include <linux/pseudo_fs.h>
 #include "internal.h"
 
 static DEFINE_MUTEX(erofs_domain_list_lock);
 static DEFINE_MUTEX(erofs_domain_cookies_lock);
 static LIST_HEAD(erofs_domain_list);
-static struct vfsmount *erofs_pseudo_mnt;
+static struct vfsmount *erofs_pseudo_mnt __read_mostly;
 
 struct erofs_fscache_request {
 	struct erofs_fscache_request *primary;
@@ -456,10 +457,6 @@ static void erofs_fscache_domain_put(struct erofs_domain *domain)
 	mutex_lock(&erofs_domain_list_lock);
 	if (refcount_dec_and_test(&domain->ref)) {
 		list_del(&domain->list);
-		if (list_empty(&erofs_domain_list)) {
-			kern_unmount(erofs_pseudo_mnt);
-			erofs_pseudo_mnt = NULL;
-		}
 		mutex_unlock(&erofs_domain_list_lock);
 		fscache_relinquish_volume(domain->volume, NULL, false);
 		kfree(domain->domain_id);
@@ -511,15 +508,10 @@ static int erofs_fscache_init_domain(struct super_block *sb)
 	}
 
 	err = erofs_fscache_register_volume(sb);
-	if (err)
-		goto out;
-
-	if (!erofs_pseudo_mnt) {
-		erofs_pseudo_mnt = kern_mount(&erofs_fs_type);
-		if (IS_ERR(erofs_pseudo_mnt)) {
-			err = PTR_ERR(erofs_pseudo_mnt);
-			goto out;
-		}
+	if (err) {
+		kfree(domain->domain_id);
+		kfree(domain);
+		return err;
 	}
 
 	domain->volume = sbi->volume;
@@ -527,10 +519,6 @@ static int erofs_fscache_init_domain(struct super_block *sb)
 	list_add(&domain->list, &erofs_domain_list);
 	sbi->domain = domain;
 	return 0;
-out:
-	kfree(domain->domain_id);
-	kfree(domain);
-	return err;
 }
 
 static int erofs_fscache_register_domain(struct super_block *sb)
@@ -764,4 +752,26 @@ void erofs_fscache_unregister_fs(struct super_block *sb)
 	sbi->s_fscache = NULL;
 	sbi->volume = NULL;
 	sbi->domain = NULL;
+}
+
+static int erofs_fc_anon_get_tree(struct fs_context *fc)
+{
+	return PTR_ERR_OR_ZERO(init_pseudo(fc, EROFS_SUPER_MAGIC));
+}
+
+int __init erofs_fscache_init(void)
+{
+	static struct file_system_type erofs_anon_fs = {
+		.name		= "erofs_anonfs",
+		.init_fs_context = erofs_fc_anon_get_tree,
+		.kill_sb	= kill_anon_super,
+	};
+
+	erofs_pseudo_mnt = kern_mount(&erofs_anon_fs);
+	return PTR_ERR_OR_ZERO(erofs_pseudo_mnt);
+}
+
+void erofs_fscache_exit(void)
+{
+	kern_unmount(erofs_pseudo_mnt);
 }

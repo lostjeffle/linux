@@ -636,6 +636,9 @@ static inline int z_erofs_load_lzma_config(struct super_block *sb,
 
 /* fscache.c */
 #ifdef CONFIG_EROFS_FS_ONDEMAND
+int __init erofs_fscache_init(void);
+void erofs_fscache_exit(void);
+
 int erofs_fscache_register_fs(struct super_block *sb);
 void erofs_fscache_unregister_fs(struct super_block *sb);
 
@@ -647,6 +650,9 @@ void erofs_fscache_unregister_cookie(struct erofs_fscache *fscache);
 extern const struct address_space_operations erofs_fscache_access_aops;
 extern const struct file_operations erofs_fscache_share_file_fops;
 #else
+static inline int erofs_fscache_init(void) { return 0; }
+static inline void erofs_fscache_exit(void) {}
+
 static inline int erofs_fscache_register_fs(struct super_block *sb)
 {
 	return -EOPNOTSUPP;
