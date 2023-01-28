@@ -207,7 +207,7 @@ static int erofs_fscache_data_read_slice(struct erofs_fscache_request *primary)
 	int ret;
 
 	map.m_la = pos;
-	ret = erofs_map_blocks(inode, &map, EROFS_GET_BLOCKS_RAW);
+	ret = erofs_map(inode, &map, &mdev);
 	if (ret)
 		return ret;
 
@@ -247,14 +247,6 @@ static int erofs_fscache_data_read_slice(struct erofs_fscache_request *primary)
 
 	count = min_t(size_t, map.m_llen - (pos - map.m_la), count);
 	DBG_BUGON(!count || count % PAGE_SIZE);
-
-	mdev = (struct erofs_map_dev) {
-		.m_deviceid = map.m_deviceid,
-		.m_pa = map.m_pa,
-	};
-	ret = erofs_map_dev(sb, &mdev);
-	if (ret)
-		return ret;
 
 	req = erofs_fscache_req_chain(primary, count);
 	if (IS_ERR(req))

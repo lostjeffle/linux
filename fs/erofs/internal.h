@@ -478,6 +478,8 @@ int erofs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		 u64 start, u64 len);
 int erofs_map_blocks(struct inode *inode,
 		     struct erofs_map_blocks *map, int flags);
+int erofs_map(struct inode *inode, struct erofs_map_blocks *map,
+	      struct erofs_map_dev *mdev);
 
 /* inode.c */
 static inline unsigned long erofs_inode_hash(erofs_nid_t nid)

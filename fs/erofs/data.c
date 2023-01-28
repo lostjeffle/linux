@@ -245,6 +245,22 @@ int erofs_map_dev(struct super_block *sb, struct erofs_map_dev *map)
 	return 0;
 }
 
+int erofs_map(struct inode *inode, struct erofs_map_blocks *map,
+	      struct erofs_map_dev *mdev)
+{
+	int ret;
+
+	ret = erofs_map_blocks(inode, map, EROFS_GET_BLOCKS_RAW);
+	if (ret < 0)
+		return ret;
+
+	*mdev = (struct erofs_map_dev) {
+		.m_deviceid = map->m_deviceid,
+		.m_pa = map->m_pa,
+	};
+	return erofs_map_dev(inode->i_sb, mdev);
+}
+
 static int erofs_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 		unsigned int flags, struct iomap *iomap, struct iomap *srcmap)
 {
@@ -254,16 +270,7 @@ static int erofs_iomap_begin(struct inode *inode, loff_t offset, loff_t length,
 
 	map.m_la = offset;
 	map.m_llen = length;
-
-	ret = erofs_map_blocks(inode, &map, EROFS_GET_BLOCKS_RAW);
-	if (ret < 0)
-		return ret;
-
-	mdev = (struct erofs_map_dev) {
-		.m_deviceid = map.m_deviceid,
-		.m_pa = map.m_pa,
-	};
-	ret = erofs_map_dev(inode->i_sb, &mdev);
+	ret = erofs_map(inode, &map, &mdev);
 	if (ret)
 		return ret;
 
