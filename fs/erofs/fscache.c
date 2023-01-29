@@ -539,6 +539,15 @@ struct erofs_fscache *erofs_fscache_acquire_cookie(struct super_block *sb,
 	mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);
 	inode->i_private = ctx;
 
+	if (test_opt(&EROFS_SB(sb)->opt, SHARE_CACHE)) {
+		struct netfs_cache_resources cres;
+		ret = fscache_begin_read_operation(&cres, cookie);
+		if (ret)
+			goto err_cookie;
+		fscache_end_operation(&cres);
+		inode->i_size = cookie->object_size;
+	}
+
 	ctx->cookie = cookie;
 	ctx->inode = inode;
 	return ctx;
