@@ -193,6 +193,30 @@ static int erofs_fscache_meta_read_folio(struct file *data, struct folio *folio)
 	return ret;
 }
 
+static void erofs_fscache_meta_readahead(struct readahead_control *rac)
+{
+	int ret;
+	struct erofs_fscache *ctx = rac->mapping->host->i_private;
+	struct erofs_fscache_request *req;
+
+	if (!readahead_count(rac))
+		return;
+
+	req = erofs_fscache_req_alloc(rac->mapping,
+			readahead_pos(rac), readahead_length(rac));
+	if (IS_ERR(req))
+		return;
+
+	/* The request completion will drop refs on the folios. */
+	while (readahead_folio(rac))
+		;
+
+	ret = erofs_fscache_read_folios_async(ctx->cookie, req, req->start, req->len);
+	if (ret)
+		req->error = ret;
+	erofs_fscache_req_put(req);
+}
+
 static int erofs_fscache_data_read_slice(struct erofs_fscache_request *primary)
 {
 	struct address_space *mapping = primary->mapping;
@@ -311,6 +335,7 @@ static void erofs_fscache_readahead(struct readahead_control *rac)
 
 static const struct address_space_operations erofs_fscache_meta_aops = {
 	.read_folio = erofs_fscache_meta_read_folio,
+	.readahead  = erofs_fscache_meta_readahead,
 };
 
 const struct address_space_operations erofs_fscache_access_aops = {
