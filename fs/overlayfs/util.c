@@ -108,7 +108,7 @@ void ovl_dentry_update_reval(struct dentry *dentry, struct dentry *upperdentry,
 
 	if (upperdentry)
 		flags |= upperdentry->d_flags;
-	for (i = 0; i < oe->numlower; i++)
+	for (i = 0; i < oe->numlower && oe->lowerstack[i].dentry; i++)
 		flags |= oe->lowerstack[i].dentry->d_flags;
 
 	spin_lock(&dentry->d_lock);

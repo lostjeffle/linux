@@ -245,10 +245,16 @@ int ovl_getattr(struct user_namespace *mnt_userns, const struct path *path,
 			u32 lowermask = STATX_BLOCKS;
 
 			ovl_path_lowerdata(dentry, &realpath);
-			err = vfs_getattr(&realpath, &lowerdatastat,
-					  lowermask, flags);
-			if (err)
-				goto out;
+			if (realpath.dentry) {
+				err = vfs_getattr(&realpath, &lowerdatastat,
+						  lowermask, flags);
+				if (err)
+					goto out;
+			} else {
+				/* TODO: store lowerdata blocks in metacopy xattr? */
+				lowerdatastat.blocks =
+					DIV_ROUND_UP(stat->size, stat->blksize) << 3;
+			}
 			stat->blocks = lowerdatastat.blocks;
 		}
 	}
@@ -710,7 +716,8 @@ static int ovl_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 	struct inode *realinode = ovl_inode_realdata(inode);
 	const struct cred *old_cred;
 
-	if (!realinode->i_op->fiemap)
+	/* TODO: lazy lookup of lowerdata */
+	if (!realinode || !realinode->i_op->fiemap)
 		return -EOPNOTSUPP;
 
 	old_cred = ovl_override_creds(inode->i_sb);
