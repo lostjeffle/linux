@@ -176,7 +176,8 @@ void ovl_path_lowerdata(struct dentry *dentry, struct path *path)
 
 	if (oe->numlower) {
 		path->mnt = oe->lowerstack[oe->numlower - 1].layer->mnt;
-		path->dentry = oe->lowerstack[oe->numlower - 1].dentry;
+		path->dentry =
+			READ_ONCE(oe->lowerstack[oe->numlower - 1].dentry);
 	} else {
 		*path = (struct path) { };
 	}
@@ -237,7 +238,27 @@ struct dentry *ovl_dentry_lowerdata(struct dentry *dentry)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
 
-	return oe->numlower ? oe->lowerstack[oe->numlower - 1].dentry : NULL;
+	return oe->numlower ?
+		READ_ONCE(oe->lowerstack[oe->numlower - 1].dentry) : NULL;
+}
+
+int ovl_dentry_set_lowerdata(struct dentry *dentry, struct dentry *lowerdata)
+{
+	struct ovl_entry *oe = dentry->d_fsdata;
+	struct dentry *old;
+
+	if (WARN_ON_ONCE(!oe->numlower) || !d_is_reg(lowerdata) ||
+	    ovl_dentry_remote(lowerdata) || ovl_dentry_weird(lowerdata)) {
+		dput(lowerdata);
+		return -EIO;
+	}
+
+	old = cmpxchg_release(&oe->lowerstack[oe->numlower - 1].dentry, NULL,
+			      lowerdata);
+	if (old)
+		dput(lowerdata);
+
+	return 0;
 }
 
 struct dentry *ovl_dentry_real(struct dentry *dentry)
