@@ -21,6 +21,10 @@ static void *erofs_read_inode(struct erofs_buf *buf,
 	struct erofs_inode_compact *dic;
 	struct erofs_inode_extended *die, *copied = NULL;
 	unsigned int ifmt;
+	struct folio *folio;
+	struct inode *binode = sb->s_bdev->bd_inode;
+	struct address_space *mapping = binode->i_mapping;
+	pgoff_t index = inode_loc >> PAGE_SHIFT;
 	int err;
 
 	blkaddr = erofs_blknr(inode_loc);
@@ -28,6 +32,16 @@ static void *erofs_read_inode(struct erofs_buf *buf,
 
 	erofs_dbg("%s, reading inode nid %llu at %u of blkaddr %u",
 		  __func__, vi->nid, *ofs, blkaddr);
+
+	folio = filemap_get_folio(mapping, index);
+	if (!folio || !folio_test_uptodate(folio)) {
+		loff_t isize = i_size_read(binode);
+		pgoff_t end_index = (isize - 1) >> PAGE_SHIFT;
+		unsigned long nr_to_read = min_t(unsigned long, end_index - index, 32);
+		DEFINE_READAHEAD(ractl, NULL, NULL, mapping, index);
+
+		page_cache_ra_unbounded(&ractl, nr_to_read, 0);
+	}
 
 	kaddr = erofs_read_metabuf(buf, sb, blkaddr, EROFS_KMAP);
 	if (IS_ERR(kaddr)) {
